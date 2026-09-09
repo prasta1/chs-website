@@ -1,0 +1,5 @@
+# Reference-only wget mirror of the current Weebly site (~79MB) — not part of the build
+cambridgehistoricalsociety.org/
+wget.log
+
+.DS_Store
