@@ -21,6 +21,27 @@ TOLERANCE = 0.02  # 2% drift allowed before a source is considered broken
 # for a human to skim and dismiss, not an auto-fail.
 MERGE_PATTERN = re.compile(r"[a-z][A-Z]")
 
+# import_key shape: <sha1>[:role][-N]. Role fan-out (":father"/":mother"/
+# ":groom"/":bride") comes first; duplicate-line disambiguation ("-1"/"-2")
+# is appended *after* that by _dedupe_import_keys, not before it.
+_KEY_ROOT = re.compile(r"^(?P<sha>[0-9a-f]{40})(?::[a-z]+)?(?P<dup>-\d+)?$")
+
+
+def _source_row_key(import_key: str) -> str:
+    """Collapse a role fan-out key back to the source row it came from.
+
+    Keys are <sha1>[:role][-N]: role fan-out appends :father/:mother/:groom/
+    :bride, and duplicate-line disambiguation appends -N *after* that. Both
+    parts must be handled together -- stripping at the first ':' would discard
+    the -N as well and merge two genuinely distinct duplicate rows into one
+    (e.g. <sha1>:groom and <sha1>:groom-1, two different marriage lines that
+    happen to hash the same, would both read back as <sha1>).
+    """
+    m = _KEY_ROOT.match(import_key)
+    if not m:
+        return import_key
+    return m["sha"] + (m["dup"] or "")
+
 
 def check_counts(conn: sqlite3.Connection, baseline: dict[str, int]) -> list[str]:
     """Compare per-source active row counts against the committed baseline."""
@@ -83,11 +104,12 @@ def reconcile(conn: sqlite3.Connection, pdf_dir: Path) -> dict[str, dict]:
 
     rows_in is the number of source table rows the parser's own page range
     actually covers. rows_out is the number of distinct source rows
-    represented in the database, recovered from import_key: every key begins
-    with the sha1 of (filename, page, raw_line), with role fan-out
-    (":father"/":mother"/":groom"/":bride") and duplicate-line disambiguation
-    ("-1"/"-2") appended after it, so splitting on the first ":" collapses a
-    row's fan-out back to one id.
+    represented in the database, recovered from import_key via
+    _source_row_key: every key begins with the sha1 of (filename, page,
+    raw_line), with role fan-out (":father"/":mother"/":groom"/":bride") and
+    duplicate-line disambiguation ("-1"/"-2") appended after it -- collapsing
+    a row's fan-out back to one id has to keep the -N suffix, or two
+    genuinely distinct duplicate rows collapse into one.
 
     The gap is rows that produced no appearance at all -- not an error, not a
     warning, just absent. E.g. marriage_records2 p.15 prints "John
@@ -112,7 +134,7 @@ def reconcile(conn: sqlite3.Connection, pdf_dir: Path) -> dict[str, dict]:
         keys = conn.execute(
             "SELECT import_key FROM appearance WHERE source_id=? AND"
             " status='active' AND import_key IS NOT NULL", (src["id"],)).fetchall()
-        rows_out = len({k["import_key"].split(":", 1)[0] for k in keys})
+        rows_out = len({_source_row_key(k["import_key"]) for k in keys})
         out[path.name] = {"rows_in": rows_in, "rows_out": rows_out,
                           "delta": rows_in - rows_out}
     return out

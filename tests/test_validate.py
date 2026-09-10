@@ -190,6 +190,25 @@ def test_review_report_does_not_flag_ordinary_names_as_merged(conn):
 
 # ---- reconcile ----
 
+def test_source_row_key_keeps_a_duplicate_suffix_that_follows_a_role():
+    """<sha1>:groom-1 is a different source row from <sha1>:groom.
+
+    Splitting at the first ':' would discard the -N and merge them.
+    """
+    from scripts.validate import _source_row_key
+
+    sha = "a" * 40
+    assert _source_row_key(sha) == sha
+    assert _source_row_key(f"{sha}:groom") == sha
+    assert _source_row_key(f"{sha}:bride") == sha
+    assert _source_row_key(f"{sha}-1") == f"{sha}-1"
+    assert _source_row_key(f"{sha}:groom-1") == f"{sha}-1"
+    assert _source_row_key(f"{sha}:bride-1") == f"{sha}-1"
+    # the two halves of one marriage collapse together; a duplicate row does not
+    assert _source_row_key(f"{sha}:groom") == _source_row_key(f"{sha}:bride")
+    assert _source_row_key(f"{sha}:groom") != _source_row_key(f"{sha}:groom-1")
+
+
 def test_reconcile_matches_parser_output_for_a_small_real_source(tmp_path):
     """riverroad.pdf is small (20 rows) and clean -- every row keeps its
     surname, so rows_in and rows_out must match exactly with zero delta."""
@@ -214,9 +233,9 @@ def test_reconcile_matches_parser_output_for_a_small_real_source(tmp_path):
 
 def test_reconcile_collapses_role_fanout_to_one_source_row(tmp_path):
     """One birth row fans out into child/father/mother appearances sharing a
-    base import_key ('abc123', 'abc123:father', 'abc123:mother'). rows_out must
-    count that as one source row, not three, or every multi-role row inflates
-    the count and a real drop elsewhere gets diluted out of sight."""
+    base import_key (sha, 'sha:father', 'sha:mother'). rows_out must count
+    that as one source row, not three, or every multi-role row inflates the
+    count and a real drop elsewhere gets diluted out of sight."""
     from scripts.validate import reconcile
 
     c = connect(tmp_path / "t.sqlite")
@@ -228,12 +247,39 @@ def test_reconcile_collapses_role_fanout_to_one_source_row(tmp_path):
     c.commit()
     sid = c.execute("SELECT id FROM source WHERE filename='riverroad.pdf'"
                     ).fetchone()["id"]
-    make_appearance(c, source_id=sid, import_key="abc123")
-    make_appearance(c, source_id=sid, import_key="abc123:father")
-    make_appearance(c, source_id=sid, import_key="abc123:mother")
+    sha = "a" * 40
+    make_appearance(c, source_id=sid, import_key=sha)
+    make_appearance(c, source_id=sid, import_key=f"{sha}:father")
+    make_appearance(c, source_id=sid, import_key=f"{sha}:mother")
     c.commit()
 
     assert reconcile(c, PDF_DIR)["riverroad.pdf"]["rows_out"] == 1
+
+
+def test_reconcile_keeps_duplicate_marriage_rows_distinct(tmp_path):
+    """Two genuinely distinct source rows that happen to hash the same (a
+    byte-identical duplicate line) fan out into groom/bride pairs sharing one
+    sha but different -N dedup suffixes: sha:groom, sha:bride, sha:groom-1,
+    sha:bride-1. rows_out must read that as 2 source rows, not 1 -- splitting
+    at the first ':' would discard the -N and collapse them, fabricating a
+    dropped-row signal for two rows that both made it in."""
+    from scripts.validate import reconcile
+
+    c = connect(tmp_path / "t.sqlite")
+    init_schema(c)
+    c.execute("INSERT INTO source (filename,title,kind,pages,sha256,imported_at)"
+              " VALUES ('marriage_records2.pdf','Marriage records','vital',1,"
+              "'s','now')")
+    c.commit()
+    sid = c.execute("SELECT id FROM source WHERE filename='marriage_records2.pdf'"
+                    ).fetchone()["id"]
+    sha = "b" * 40
+    for key in (sha + ":groom", sha + ":bride",
+                sha + ":groom-1", sha + ":bride-1"):
+        make_appearance(c, source_id=sid, import_key=key)
+    c.commit()
+
+    assert reconcile(c, PDF_DIR)["marriage_records2.pdf"]["rows_out"] == 2
 
 
 def test_reconcile_catches_the_known_dropped_marriage_row(tmp_path):
