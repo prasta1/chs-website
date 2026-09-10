@@ -35,6 +35,33 @@ def test_hand_edited_rows_are_never_overwritten(conn):
     assert conn.execute("SELECT given FROM appearance").fetchone()["given"] == "Ruthe"
 
 
+def test_edited_row_is_never_retired_even_if_its_key_vanishes(conn):
+    """A human corrected this row; re-running import must never silently
+    retire it just because its source line changed or disappeared -- that
+    would make the correction unreachable from every status='active' query,
+    which is exactly what review_report and reconcile both filter to."""
+    upsert(conn, 1, [make(key="edited")])
+    conn.execute("UPDATE appearance SET given='Ruthe', edited_at='2026-01-01',"
+                 " edited_by='jen' WHERE import_key='edited'")
+    conn.commit()
+    upsert(conn, 1, [make(key="unrelated")])  # 'edited' key absent from this parse
+    row = conn.execute("SELECT status, given, key_seen FROM appearance"
+                       " WHERE import_key='edited'").fetchone()
+    assert row["status"] == "active"
+    assert row["given"] == "Ruthe"
+    assert row["key_seen"] == 0
+
+
+def test_edited_rows_key_seen_flag_clears_when_the_key_reappears(conn):
+    upsert(conn, 1, [make(key="edited")])
+    conn.execute("UPDATE appearance SET edited_at='2026-01-01' WHERE import_key='edited'")
+    conn.commit()
+    upsert(conn, 1, [make(key="unrelated")])  # key goes missing -> key_seen=0
+    upsert(conn, 1, [make(key="edited")])     # key reappears byte-identical
+    row = conn.execute("SELECT key_seen FROM appearance WHERE import_key='edited'").fetchone()
+    assert row["key_seen"] == 1
+
+
 def test_rows_absent_from_reimport_are_retired_not_deleted(conn):
     upsert(conn, 1, [make(key="gone")])
     upsert(conn, 1, [make(key="stays")])

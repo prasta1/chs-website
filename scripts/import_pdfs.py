@@ -1,8 +1,11 @@
 """Load record PDFs into SQLite, preserving hand corrections.
 
 The PDFs are one input and the volunteers are another. Re-running import must
-never destroy a correction, so rows carrying edited_at are left untouched and
-rows that vanish from a source are retired rather than deleted.
+never destroy a correction, so rows carrying edited_at are left untouched,
+and unedited rows that vanish from a source are retired rather than deleted.
+A hand-edited row is never retired even if its import_key vanishes (the
+source line changed or disappeared) -- it stays active and authoritative,
+flagged instead via key_seen for a human to reconcile (see upsert()).
 """
 import hashlib
 import sqlite3
@@ -46,11 +49,16 @@ def upsert(conn: sqlite3.Connection, source_id: int,
     """Write rows for one source. Returns (inserted, updated, skipped_edited).
 
     Rows already in the database for this source but absent from `rows` are
-    marked retired.
+    marked retired -- *unless* they carry a hand correction (`edited_at`
+    set). A human corrected that row, so it stays authoritative: it is left
+    `active` and its `key_seen` flag is cleared to 0 instead, so
+    review_report can surface it as a hand correction whose source line has
+    changed or vanished, for a human to reconcile. Nothing edited is ever
+    deleted or silently dropped from view.
     """
     existing = {
         r["import_key"]: r for r in conn.execute(
-            "SELECT import_key, edited_at FROM appearance WHERE source_id = ?",
+            "SELECT import_key, edited_at, key_seen FROM appearance WHERE source_id = ?",
             (source_id,))
         if r["import_key"] is not None
     }
@@ -61,6 +69,12 @@ def upsert(conn: sqlite3.Connection, source_id: int,
         prior = existing.get(a.import_key)
         if prior is not None and prior["edited_at"]:
             skipped += 1
+            if not prior["key_seen"]:
+                # The key had previously gone missing and reappeared
+                # byte-identical -- clear the stale flag.
+                conn.execute(
+                    "UPDATE appearance SET key_seen=1 WHERE import_key=?",
+                    (a.import_key,))
             continue
         # Named placeholders so one dict drives both statements — the INSERT and
         # UPDATE differ only in whether source_id is set.
@@ -69,29 +83,34 @@ def upsert(conn: sqlite3.Connection, source_id: int,
             "raw_line": a.raw_line, "surname": a.surname, "given": a.given,
             "surname_key": a.surname_key, "kind": a.kind, "role": a.role,
             "pair_key": a.pair_key, "date_raw": a.date_raw,
-            "date_iso": a.date_iso, "place": a.place, "detail": a.detail,
+            "date_iso": a.date_iso, "place": a.place, "volume": a.volume,
+            "detail": a.detail,
         }
         if prior is None:
             conn.execute(
                 "INSERT INTO appearance (source_id,page,import_key,raw_line,surname,"
-                "given,surname_key,kind,role,pair_key,date_raw,date_iso,place,detail)"
-                " VALUES (:source_id,:page,:import_key,:raw_line,:surname,:given,"
-                ":surname_key,:kind,:role,:pair_key,:date_raw,:date_iso,:place,"
-                ":detail)", fields)
+                "given,surname_key,kind,role,pair_key,date_raw,date_iso,place,volume,"
+                "detail) VALUES (:source_id,:page,:import_key,:raw_line,:surname,"
+                ":given,:surname_key,:kind,:role,:pair_key,:date_raw,:date_iso,:place,"
+                ":volume,:detail)", fields)
             inserted += 1
         else:
             conn.execute(
                 "UPDATE appearance SET page=:page, raw_line=:raw_line,"
                 " surname=:surname, given=:given, surname_key=:surname_key,"
                 " kind=:kind, role=:role, pair_key=:pair_key, date_raw=:date_raw,"
-                " date_iso=:date_iso, place=:place, detail=:detail,"
+                " date_iso=:date_iso, place=:place, volume=:volume, detail=:detail,"
                 " status='active' WHERE import_key=:import_key", fields)
             updated += 1
 
     stale = [k for k in existing if k not in seen]
     for key in stale:
-        conn.execute("UPDATE appearance SET status='retired' WHERE import_key=?",
-                     (key,))
+        if existing[key]["edited_at"]:
+            conn.execute("UPDATE appearance SET key_seen=0 WHERE import_key=?",
+                         (key,))
+        else:
+            conn.execute("UPDATE appearance SET status='retired' WHERE import_key=?",
+                         (key,))
     conn.commit()
     return inserted, updated, skipped
 
