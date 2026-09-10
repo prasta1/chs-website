@@ -19,6 +19,14 @@ def test_cemetery_skips_the_header_row():
     assert not any(a.surname == "Last" for a in rows)
 
 
+def test_no_cemetery_emits_its_header_as_a_person():
+    for stem in ("mtview", "jeffersonville", "northcambridge", "southcambridge",
+                 "plainsroad", "eastcambridge", "hopkins", "smilie"):
+        rows = parse_cemetery(PDF_DIR / f"{stem}.pdf", stem)
+        bogus = [a for a in rows if a.surname == "Last Name" or a.given == "First Name"]
+        assert bogus == [], f"{stem} emitted {len(bogus)} header rows as people"
+
+
 def test_cemetery_row_count_is_plausible():
     rows = parse_cemetery(PDF_DIR / "cloverdale.pdf", "Cloverdale Cemetery")
     assert 140 <= len(rows) <= 170

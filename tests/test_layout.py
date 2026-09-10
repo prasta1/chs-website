@@ -113,3 +113,20 @@ def test_iter_table_pages_skips_a_title_row_via_header_contains():
     assert [c.name for c in cols] == ["Volume", "Date of Oath", "First Name", "Last Name"]
     assert not any("Oaths" in w.text for w in rows[0]), \
         "the title row must be dropped, not yielded as data"
+
+
+def test_iter_table_pages_drops_headers_reprinted_on_later_pages():
+    """Most cemetery files reprint their column header on every page.
+
+    header_texts is read from the file's own header row rather than hand-typed,
+    so the check can't drift from what the real header actually says (mtview's
+    carries Spouse/Mother/Father/Notes too — a fixed, incomplete word list here
+    would make this assert trivially true regardless of whether the fix works).
+    """
+    header_row = rows_for("mtview")[0]
+    header_texts = tuple(w.text for w in header_row)
+    pages = list(iter_table_pages(PDF_DIR / "mtview.pdf"))
+    for page, _cols, rows in pages:
+        for row in rows:
+            assert tuple(w.text for w in row) != header_texts, \
+                f"header row leaked as data on page {page}"

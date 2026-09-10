@@ -127,9 +127,15 @@ def iter_table_pages(pdf_path: Path, first_page: int = 1, last_page: int | None 
     `header_contains` names a word the header is known to carry, so leading
     title rows are skipped rather than mistaken for the header — some of these
     tables print a caption line above their column names.
+
+    Most of these tables reprint their column header on every page, not just
+    the first. A repeated header is not a record, so any row whose word texts
+    exactly match the detected header row is dropped, on whichever page it
+    turns up.
     """
     end = page_count(pdf_path) if last_page is None else last_page
     cols = None
+    header_texts = None
     for page in range(first_page, end + 1):
         rows = group_rows(extract_words(pdf_path, page))
         if not rows:
@@ -143,5 +149,8 @@ def iter_table_pages(pdf_path: Path, first_page: int = 1, last_page: int | None 
                     if any(w.text == header_contains for w in row)
                 )
             cols = detect_columns(rows[header_idx])
+            header_texts = tuple(w.text for w in rows[header_idx])
             start = header_idx + 1
-        yield page, cols, rows[start:]
+        data_rows = [r for r in rows[start:]
+                     if tuple(w.text for w in r) != header_texts]
+        yield page, cols, data_rows
