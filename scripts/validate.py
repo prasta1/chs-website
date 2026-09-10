@@ -149,6 +149,16 @@ def reconcile(conn: sqlite3.Connection, pdf_dir: Path) -> dict[str, dict]:
     Never fails the build: some rows legitimately carry no surname (a blank
     ledger line). The number must be seen, not gated -- a review_report flag
     or a reconcile spike is what tells a human to go look.
+
+    delta is blind to a *half*-dropped row: marriage_records2 p.14 prints
+    "Bk. B p. 234 6 Jan 1836 John FrederickWait Evelina Hawley he of Barre".
+    pdftotext merges Frederick+Wait, so Groom Last comes out empty and
+    parse_marriage drops the groom -- but the bride still emits, so the
+    source row still yields one root and delta reads 0. half_pairs catches
+    this: a marriage pair_key with only one active member (should be
+    groom+bride, two) means a party was lost. Restricted to kind='marriage'
+    -- birth's father/mother are legitimately optional, so a lone child row
+    is normal there, not a drop.
     """
     out = {}
     for stem in SOURCES:
@@ -163,8 +173,13 @@ def reconcile(conn: sqlite3.Connection, pdf_dir: Path) -> dict[str, dict]:
             "SELECT import_key FROM appearance WHERE source_id=? AND"
             " status='active' AND import_key IS NOT NULL", (src["id"],)).fetchall()
         rows_out = len({_source_row_key(k["import_key"]) for k in keys})
+        half_pairs = conn.execute(
+            "SELECT COUNT(*) c FROM (SELECT pair_key FROM appearance WHERE"
+            " source_id=? AND status='active' AND kind='marriage' AND"
+            " pair_key IS NOT NULL GROUP BY pair_key HAVING COUNT(*)=1)",
+            (src["id"],)).fetchone()["c"]
         out[path.name] = {"rows_in": rows_in, "rows_out": rows_out,
-                          "delta": rows_in - rows_out}
+                          "delta": rows_in - rows_out, "half_pairs": half_pairs}
     return out
 
 
@@ -192,18 +207,31 @@ def review_report(conn: sqlite3.Connection) -> list[dict]:
     the most recent import (see `key_seen` and scripts/import_pdfs.upsert).
     Such a row is never retired -- the human correction stays authoritative
     -- but it needs a human to reconcile it against the PDF's current text.
+
+    Also flags a marriage whose pair_key has only one active member (see
+    reconcile's half_pairs) -- the other party was lost, most often a
+    merged-word artifact that emptied their name column. Surfaced for a
+    human to consult the original page, never guessed at.
     """
     flags = []
     rows = conn.execute(
         "SELECT a.id, a.surname, a.given, a.date_raw, a.date_iso, a.page,"
-        " a.raw_line, a.edited_at, a.key_seen, s.filename FROM appearance a"
-        " JOIN source s ON s.id=a.source_id WHERE a.status='active'").fetchall()
+        " a.raw_line, a.edited_at, a.key_seen, a.kind, a.pair_key, s.filename"
+        " FROM appearance a JOIN source s ON s.id=a.source_id"
+        " WHERE a.status='active'").fetchall()
 
     # Frequency of each token as a surname across the corpus, computed once.
     sur: dict[str, int] = {}
     for r in rows:
         if r["surname"]:
             sur[r["surname"]] = sur.get(r["surname"], 0) + 1
+
+    # Marriage pair_key group sizes, computed once -- a group of 1 means the
+    # other party (groom or bride) was dropped by the parser.
+    marriage_pairs: dict[str, int] = {}
+    for r in rows:
+        if r["kind"] == "marriage" and r["pair_key"]:
+            marriage_pairs[r["pair_key"]] = marriage_pairs.get(r["pair_key"], 0) + 1
 
     for r in rows:
         reasons = []
@@ -224,6 +252,9 @@ def review_report(conn: sqlite3.Connection) -> list[dict]:
             reasons.append("possible merged words in raw_line")
         if r["edited_at"] and not r["key_seen"]:
             reasons.append("hand correction's source line has changed or vanished")
+        if (r["kind"] == "marriage" and r["pair_key"]
+                and marriage_pairs.get(r["pair_key"], 0) == 1):
+            reasons.append("other marriage party missing (possible merged/dropped name)")
         if reasons:
             flags.append({"id": r["id"], "file": r["filename"], "page": r["page"],
                           "name": f"{r['surname']}, {r['given']}",
@@ -245,16 +276,17 @@ if __name__ == "__main__":
         print(f"FAIL {p}")
 
     print("\nreconciliation (source rows in vs. rows represented in the db):")
-    total_in = total_out = 0
+    total_in = total_out = total_half = 0
     for filename in sorted(recon):
         r = recon[filename]
         total_in += r["rows_in"]
         total_out += r["rows_out"]
-        marker = "  <-- check" if r["delta"] else ""
+        total_half += r["half_pairs"]
+        marker = "  <-- check" if r["delta"] or r["half_pairs"] else ""
         print(f"  {filename:<28} in={r['rows_in']:<6} out={r['rows_out']:<6}"
-              f" delta={r['delta']}{marker}")
+              f" delta={r['delta']:<4} half_pairs={r['half_pairs']}{marker}")
     print(f"  {'TOTAL':<28} in={total_in:<6} out={total_out:<6}"
-          f" delta={total_in - total_out}")
+          f" delta={total_in - total_out:<4} half_pairs={total_half}")
 
     print(f"\n{len(report)} rows flagged for review")
     for f in report[:40]:

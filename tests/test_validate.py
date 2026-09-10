@@ -13,13 +13,14 @@ from scripts.db import connect, init_schema
 def make_appearance(conn, source_id=1, surname="Atwood", given="Ruth", page=1,
                     import_key="k1", raw_line="Atwood Ruth 11 Feb 1831",
                     surname_key="ATT", kind="burial", date_raw=None,
-                    date_iso=None, status="active", edited_at=None, key_seen=1):
+                    date_iso=None, status="active", edited_at=None, key_seen=1,
+                    pair_key=None):
     conn.execute(
         "INSERT INTO appearance (source_id,page,import_key,raw_line,surname,"
-        "given,surname_key,kind,status,date_raw,date_iso,edited_at,key_seen) VALUES"
-        " (?,?,?,?,?,?,?,?,?,?,?,?,?)",
+        "given,surname_key,kind,status,date_raw,date_iso,edited_at,key_seen,"
+        "pair_key) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
         (source_id, page, import_key, raw_line, surname, given, surname_key,
-         kind, status, date_raw, date_iso, edited_at, key_seen))
+         kind, status, date_raw, date_iso, edited_at, key_seen, pair_key))
 
 
 @pytest.fixture
@@ -308,7 +309,7 @@ def test_reconcile_matches_parser_output_for_a_small_real_source(tmp_path):
     upsert(c, sid, rows)
 
     result = reconcile(c, PDF_DIR)["riverroad.pdf"]
-    assert result == {"rows_in": 20, "rows_out": 20, "delta": 0}
+    assert result == {"rows_in": 20, "rows_out": 20, "delta": 0, "half_pairs": 0}
 
 
 def test_reconcile_collapses_role_fanout_to_one_source_row(tmp_path):
@@ -385,6 +386,65 @@ def test_reconcile_catches_the_known_dropped_marriage_row(tmp_path):
 
     result = reconcile(c, PDF_DIR)["marriage_records2.pdf"]
     assert result["delta"] >= 1
+
+
+def test_reconcile_flags_a_half_dropped_marriage_pair(tmp_path):
+    """marriage_records2 p.14 prints 'Bk. B p. 234 6 Jan 1836 John
+    FrederickWait Evelina Hawley he of Barre' -- pdftotext merges
+    Frederick+Wait so Groom Last comes out empty and parse_marriage drops
+    the groom, but the bride (Evelina Hawley) still emits. The source row
+    still yields one root, so the plain delta reads 0 for this row -- this
+    is exactly the row reconcile was built to catch, and half_pairs is the
+    signal delta can't provide. Uses the real row, not a synthetic one."""
+    from scripts.import_pdfs import _dedupe_import_keys, upsert
+    from scripts.parsers.vital import parse_marriage
+    from scripts.validate import reconcile
+
+    c = connect(tmp_path / "t.sqlite")
+    init_schema(c)
+    c.execute("INSERT INTO source (filename,title,kind,pages,sha256,imported_at)"
+              " VALUES ('marriage_records2.pdf','Marriage records','vital',1,"
+              "'s','now')")
+    c.commit()
+    sid = c.execute("SELECT id FROM source WHERE filename='marriage_records2.pdf'"
+                    ).fetchone()["id"]
+    rows = parse_marriage(PDF_DIR / "marriage_records2.pdf")
+    _dedupe_import_keys(rows)
+    upsert(c, sid, rows)
+
+    result = reconcile(c, PDF_DIR)["marriage_records2.pdf"]
+    assert result["half_pairs"] >= 1
+
+    lone = c.execute(
+        "SELECT surname, given FROM appearance WHERE source_id=? AND"
+        " status='active' AND raw_line LIKE '%FrederickWait%'", (sid,)).fetchall()
+    assert len(lone) == 1
+    assert (lone[0]["surname"], lone[0]["given"]) == ("Hawley", "Evelina")
+
+
+def test_review_report_flags_a_marriage_with_only_one_party_recorded(conn):
+    """A marriage pair_key group of size 1 means the other party was
+    dropped -- most often the FrederickWait-style merged-word artifact.
+    reconcile's delta can't see it (the source row still yields one root),
+    so review_report must surface it for a human to consult the original."""
+    make_appearance(conn, import_key="sha:bride", kind="marriage", pair_key="sha",
+                    surname="Hawley", given="Evelina")
+    conn.commit()
+    from scripts.validate import review_report
+    flags = review_report(conn)
+    assert len(flags) == 1
+    assert flags[0]["reasons"] == ["other marriage party missing (possible merged/dropped name)"]
+
+
+def test_review_report_does_not_flag_a_complete_marriage_pair(conn):
+    make_appearance(conn, import_key="sha:groom", kind="marriage", pair_key="sha",
+                    surname="Wait", given="Lewis")
+    make_appearance(conn, import_key="sha:bride", kind="marriage", pair_key="sha",
+                    surname="Perkins", given="Mary Ann")
+    conn.commit()
+    from scripts.validate import review_report
+    assert not any("marriage party missing" in r
+                   for f in review_report(conn) for r in f["reasons"])
 
 
 def test_reconcile_skips_sources_not_yet_in_the_db(conn):
