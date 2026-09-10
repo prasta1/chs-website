@@ -164,6 +164,7 @@ def import_all(conn: sqlite3.Connection, pdf_dir: Path) -> dict[str, tuple[int, 
         conn.execute(
             "INSERT INTO source (filename,title,kind,pages,sha256,imported_at)"
             " VALUES (?,?,?,?,?,?) ON CONFLICT(filename) DO UPDATE SET"
+            " title=excluded.title, kind=excluded.kind, pages=excluded.pages,"
             " sha256=excluded.sha256, imported_at=excluded.imported_at",
             (path.name, title, kind, page_count(path), _sha256(path),
              datetime.now(timezone.utc).isoformat()))

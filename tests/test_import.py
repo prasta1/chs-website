@@ -162,6 +162,65 @@ def test_import_all_reports_updates_and_skips_on_a_second_run(monkeypatch):
     assert skipped == 1, "the one hand-edited row must be preserved, not overwritten"
 
 
+def test_reimport_refreshes_stale_source_title_kind_and_pages(tmp_path, monkeypatch):
+    """title, kind, and pages must be refreshed on every re-import, not
+    frozen at whatever they were the first time a filename was seen -- the
+    ON CONFLICT clause in import_all previously refreshed only
+    sha256/imported_at, so a re-vendored PDF with a different page count, or
+    a renamed CEMETERIES title, kept the stale value in `source` forever.
+    Phase 2 will query these columns.
+
+    Driven entirely through import_all's real INSERT ... ON CONFLICT path,
+    twice, over a tmp pdf_dir: the first run copies in riverroad.pdf (1
+    page) under its real title/kind; the second run swaps in smilie.pdf (4
+    pages, a genuinely different real PDF) under the SAME stem/filename,
+    with a renamed title and different kind in SOURCES too -- the two
+    scenarios CodeRabbit named (different page count, renamed cemetery).
+    Never a hand-written row.
+    """
+    import shutil
+    import scripts.extract as extract
+    import scripts.import_pdfs as import_pdfs
+    from scripts.db import connect as c2
+    from scripts.parsers.cemetery import parse_cemetery
+
+    pdf_dir = tmp_path / "pdfs"
+    pdf_dir.mkdir()
+    shutil.copyfile(PDF_DIR / "riverroad.pdf", pdf_dir / "riverroad.pdf")
+    monkeypatch.setattr(import_pdfs, "SOURCES", {
+        "riverroad": ("River Road Cemetery", "cemetery",
+                     lambda p: parse_cemetery(p, "River Road Cemetery")),
+    })
+    conn = c2(":memory:")
+    init_schema(conn)
+    import_all(conn, pdf_dir)  # first run: real title/kind/pages for riverroad.pdf
+    before = conn.execute(
+        "SELECT title, kind, pages FROM source WHERE filename='riverroad.pdf'"
+    ).fetchone()
+
+    shutil.copyfile(PDF_DIR / "smilie.pdf", pdf_dir / "riverroad.pdf")
+    # extract.py's page_count/extract_words are lru_cache'd by path. In real
+    # use each import is its own `python -m scripts.import_pdfs` process, so
+    # the cache never survives a re-vendored PDF; here, same process, same
+    # path, so it must be cleared to see the swapped file for real instead
+    # of asserting a page count we typed in.
+    extract.page_count.cache_clear()
+    extract.extract_words.cache_clear()
+    monkeypatch.setattr(import_pdfs, "SOURCES", {
+        "riverroad": ("River Road Cemetery (renamed)", "town",
+                     lambda p: parse_cemetery(p, "River Road Cemetery (renamed)")),
+    })
+    import_all(conn, pdf_dir)  # second run: same filename, new metadata + real PDF swap
+    after = conn.execute(
+        "SELECT title, kind, pages FROM source WHERE filename='riverroad.pdf'"
+    ).fetchone()
+
+    assert (before["title"], before["kind"], before["pages"]) == (
+        "River Road Cemetery", "cemetery", 1)
+    assert (after["title"], after["kind"], after["pages"]) == (
+        "River Road Cemetery (renamed)", "town", 4)
+
+
 def test_dedupe_leaves_distinct_keys_untouched():
     rows = [make(key="a"), make(key="b"), make(key="c")]
     _dedupe_import_keys(rows)
