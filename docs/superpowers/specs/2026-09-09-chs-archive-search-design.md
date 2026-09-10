@@ -30,7 +30,7 @@ Two goals:
 | PDF hosting | Committed to this repo | An index pointing at 404s is worse than no index; five Harkener issues already 404 on Weebly |
 | Store | Cloudflare D1 (SQLite at the edge) | Real SQL for search, edit, extract; no server to run; schema is portable SQLite |
 | Editing | `/admin` behind Cloudflare Access | Volunteers get an emailed sign-in code — no install, no repo, no stored passwords |
-| Account | CHS-owned Cloudflare account | Clean succession: the org can keep its archive if Patrick steps back |
+| Account | Maintainer's existing Cloudflare account, to start | Fastest path to a working deployment; the D1 export makes a later move to a CHS-owned account cheap (see Handover) |
 | Durability | Scheduled `wrangler d1 export` committed to git | Live data in D1, versioned vendor-independent copy in the repo |
 
 A hosted database was initially rejected on the grounds that 7,400 rows is small enough to
@@ -41,7 +41,7 @@ constraint; human access was.
 ## Architecture
 
 ```
-Cloudflare Pages · project: chs-website · CHS-owned account
+Cloudflare Pages · project: chs-website · maintainer's account (see Handover)
 ├── static/          HTML, CSS, JS, and the 52 source PDFs
 ├── functions/
 │   ├── api/search           public, read-only, queries D1
@@ -236,7 +236,9 @@ Ship Phase 1 before committing to the rest.
   baseline row counts, and the review report.
 - **FTS5 availability in D1 must be verified** before Phase 4. If unavailable, fall back to
   `LIKE` over `newsletter_page`, which is adequate for 30 documents.
-- **CHS must create the Cloudflare account** before Phase 2 can deploy.
+- **The archive initially lives in the maintainer's personal Cloudflare account.** Acceptable
+  to get moving, but it leaves the society without independent control of its own data. See
+  Handover for the exit.
 - **Five Harkener issues 404 on the source site** (Jul 2020, Jun 2021, Mar 2020, Oct 2021,
   Sep 2020). Committing PDFs to the repo makes these recoverable only if CHS still holds
   the originals.
@@ -247,6 +249,25 @@ Ship Phase 1 before committing to the rest.
 - OCR or scanned page images of the original handwritten books
 - Merging appearances into unified person records
 - Replacing the live Weebly site — this remains a prototype until CHS decides otherwise
+
+## Handover
+
+The archive starts in the maintainer's existing Cloudflare account to get a working
+deployment quickly. Two things keep that from becoming a trap.
+
+**Isolation within the account is already enforced.** A D1 database is its own object, and a
+Pages project can only reach one it is explicitly bound to. Unrelated projects in the same
+account — pdwerx.dev among them — have no binding and therefore no route to this data. The
+only genuinely shared surfaces are per-account quotas (10 databases, 5 GB total, against a
+few megabytes here) and the fact that anyone with account access can see both.
+
+**Moving to a CHS-owned account is cheap by construction.** Because the durability plan
+already produces a `wrangler d1 export` dump committed to the repo, migration is: create a
+database in the new account, import the dump, repoint the Pages binding, recreate the Access
+email list. Hours of work, no rewrite, no data model change — D1 is D1.
+
+Worth doing once the society has someone willing to own an account, so CHS retains control
+of its own records independent of any one volunteer.
 
 ## Assumption to confirm
 
