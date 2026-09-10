@@ -55,7 +55,7 @@ def _paired_mothers(pdf_path: Path, second_start: int, pass1_pages: list) -> lis
 def parse_birth(pdf_path: Path) -> list[Appearance]:
     """Columns: Volume, Birth Day, Child, Family Name, Father[, Mother, Notes]."""
     second_start = find_header_page(pdf_path, SECOND_PASS_HEADING)
-    last1 = (second_start - 1) if second_start else None
+    last1 = (second_start - 1) if second_start is not None else None
     pass1_pages = list(iter_table_pages(pdf_path, last_page=last1))
     mothers = _paired_mothers(pdf_path, second_start, pass1_pages) if second_start else []
 

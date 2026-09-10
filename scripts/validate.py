@@ -114,7 +114,7 @@ def _parser_bounds(stem: str, pdf_path: Path) -> dict:
     """
     if stem in _SECOND_PASS_HEADINGS:
         start = find_header_page(pdf_path, _SECOND_PASS_HEADINGS[stem])
-        return {"last_page": (start - 1) if start else None}
+        return {"last_page": (start - 1) if start is not None else None}
     if stem == "freemansworn_records":
         return {"header_contains": "Volume"}
     return {}

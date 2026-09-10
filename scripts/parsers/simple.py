@@ -61,7 +61,7 @@ def parse_death(pdf_path: Path) -> list[Appearance]:
     raw_line -- a missing fact beats a fabricated one.
     """
     start = find_header_page(pdf_path, DEATH_SECOND_PASS_HEADING)
-    last = (start - 1) if start else None
+    last = (start - 1) if start is not None else None
     return _parse(pdf_path, "death", "deceased", "Volume/Page", "Date",
                   "Last Name", "First Name", last_page=last)
 
