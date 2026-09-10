@@ -7,6 +7,7 @@ slicing of `-layout` output misparses them.
 """
 import subprocess
 import xml.etree.ElementTree as ET
+from functools import lru_cache
 from pathlib import Path
 from typing import NamedTuple
 
@@ -22,6 +23,7 @@ class Word(NamedTuple):
     y1: float
 
 
+@lru_cache(maxsize=None)
 def page_count(pdf_path: Path) -> int:
     """Return the number of pages in the PDF."""
     out = subprocess.run(
@@ -33,10 +35,19 @@ def page_count(pdf_path: Path) -> int:
     raise ValueError(f"no page count in pdfinfo output for {pdf_path}")
 
 
+@lru_cache(maxsize=None)
 def extract_words(pdf_path: Path, page: int) -> list[Word]:
     """Extract every word on one 1-indexed page, with coordinates.
 
     Returns words in document order. Raises CalledProcessError if pdftotext fails.
+
+    Cached: the same page gets re-extracted multiple times per pipeline run
+    (a parser's own bound-finding prescan, then its real read; import then
+    validate's reconcile recounting the same pages; the test suite calling
+    the same parser repeatedly). Safe to cache because nothing mutates the
+    returned list -- Word is an immutable NamedTuple, and every caller
+    (group_rows via sorted(), and the tests) only reads it or builds new
+    lists from it.
     """
     xml = subprocess.run(
         ["pdftotext", "-q", "-bbox-layout", "-f", str(page), "-l", str(page),
