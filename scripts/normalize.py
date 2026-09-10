@@ -60,7 +60,11 @@ def surname_key(surname: str) -> str:
     s = (surname or "").strip()
     if not s:
         return ""
-    return doublemetaphone(s)[0]
+    # doublemetaphone returns '' for tokens with no letters (e.g. an illegible
+    # original transcribed as "?"). Falling back to the raw text keeps the
+    # index column non-empty -- required so "no surname_key" stays a reliable
+    # signal of a genuinely missing surname -- without inventing a name.
+    return doublemetaphone(s)[0] or s.upper()
 
 
 def import_key(filename: str, page: int, raw_line: str) -> str:
