@@ -21,8 +21,7 @@ from scripts.parsers import Appearance, bounds_for
 
 def _parse(pdf_path: Path, kind: str, role: str, vol_col: str, date_col: str,
            last_col: str, first_col: str, header_contains: str | None = None,
-           last_page: int | None = None, detail_col: str | None = None,
-           ) -> list[Appearance]:
+           last_page: int | None = None) -> list[Appearance]:
     """Shared body: one Appearance per row that names somebody."""
     out: list[Appearance] = []
     for page, cols, rows in iter_table_pages(pdf_path, last_page=last_page,
@@ -46,7 +45,6 @@ def _parse(pdf_path: Path, kind: str, role: str, vol_col: str, date_col: str,
                 date_raw=date_raw,
                 date_iso=parse_date(date_raw or ""),
                 volume=v.get(vol_col, "").strip() or None,
-                detail=(v.get(detail_col, "").strip() or None) if detail_col else None,
             ))
     return out
 
