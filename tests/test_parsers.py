@@ -1,3 +1,5 @@
+import pytest
+
 from conftest import PDF_DIR
 from scripts.parsers.cemetery import parse_cemetery
 from scripts.parsers.simple import parse_death, parse_warning, parse_freeman
@@ -14,14 +16,13 @@ def test_cemetery_extracts_expected_person():
     assert ruth.page == 1
 
 
-def test_cemetery_skips_the_header_row():
-    rows = parse_cemetery(PDF_DIR / "cloverdale.pdf", "Cloverdale Cemetery")
-    assert not any(a.surname == "Last" for a in rows)
-
-
 def test_no_cemetery_emits_its_header_as_a_person():
-    for stem in ("mtview", "jeffersonville", "northcambridge", "southcambridge",
-                 "plainsroad", "eastcambridge", "hopkins", "smilie"):
+    # All 11 cemetery inventories, not just the ones known to reprint their
+    # header on every page -- cloverdale, gates and riverroad print it once
+    # (page 1), where a broken parser could still leak it as a fake person.
+    for stem in ("cloverdale", "eastcambridge", "gates", "hopkins",
+                 "jeffersonville", "mtview", "northcambridge", "plainsroad",
+                 "riverroad", "smilie", "southcambridge"):
         rows = parse_cemetery(PDF_DIR / f"{stem}.pdf", stem)
         bogus = [a for a in rows if a.surname == "Last Name" or a.given == "First Name"]
         assert bogus == [], f"{stem} emitted {len(bogus)} header rows as people"
@@ -84,22 +85,53 @@ def test_birth_second_pass_does_not_leak_note_fragments_as_people():
     assert not [r for r in rows if '"' in r.surname or "oclock" in (r.given or "")]
 
 
+def test_paired_mothers_rejects_a_page_offset_mismatch(monkeypatch):
+    """The row-count guard alone would miss a pairing shifted onto the wrong
+    pages while every page still carries the same row count; the offset
+    check (p2 - p1 == second_start - 1) catches that shape specifically."""
+    import scripts.parsers.vital as vital
+
+    pass1_pages = [(1, [], [object()])]
+
+    def fake_iter_table_pages(pdf_path, first_page=1, **kw):
+        # second_start=2 implies an expected offset of 1, but this pairs
+        # page 1 with page 5 -- same row count (1), wrong page.
+        return iter([(5, [], [object()])])
+
+    monkeypatch.setattr(vital, "iter_table_pages", fake_iter_table_pages)
+    with pytest.raises(ValueError, match="offset"):
+        vital._paired_mothers(PDF_DIR / "birth_records.pdf", second_start=2,
+                              pass1_pages=pass1_pages)
+
+
 def test_death_extracts_person_and_date():
     rows = parse_death(PDF_DIR / "death_records.pdf")
     levi = [r for r in rows if r.surname == "Atwood" and r.given == "Levi"][0]
     assert levi.kind == "death" and levi.date_iso == "1813-02-21"
+    assert levi.role == "deceased"
 
 
 def test_warning_extracts_person_and_date():
     rows = parse_warning(PDF_DIR / "warningsout_records.pdf")
     asa = [r for r in rows if r.surname == "Adams" and r.given == "Asa"][0]
     assert asa.kind == "warning" and asa.date_iso == "1815-12-06"
+    assert asa.role == "warned"
 
 
 def test_freeman_extracts_person_and_date():
     rows = parse_freeman(PDF_DIR / "freemansworn_records.pdf")
     dexter = [r for r in rows if r.surname == "Adams" and r.given == "Dexter"][0]
     assert dexter.kind == "freeman" and dexter.date_iso == "1828-09-02"
+    assert dexter.role == "sworn"
+
+
+def test_death_folds_age_into_detail_like_cemetery_does():
+    """cemetery.py folds Age into `detail` for burials; simple.py's death
+    parser must agree rather than silently dropping the column."""
+    rows = parse_death(PDF_DIR / "death_records.pdf")
+    with_age = [r for r in rows if r.detail]
+    assert with_age, "expected at least one death row to carry an Age value"
+    assert any("y" in r.detail for r in with_age)
 
 
 def test_death_does_not_leak_the_kinship_and_cause_passes():
