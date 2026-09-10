@@ -3,6 +3,7 @@ import pytest
 import scripts.layout as layout
 from conftest import PDF_DIR
 from scripts.extract import Word, extract_words
+from scripts.import_pdfs import CEMETERIES, SOURCES
 from scripts.layout import group_rows, detect_columns, assign_columns, iter_table_pages
 
 
@@ -78,20 +79,34 @@ def test_assign_columns_never_collapses_duplicate_column_names():
 
 CEMETERY_COLS = ["Last Name", "First Name", "Maiden Name", "Born", "Died", "Age"]
 
-# Every record table, not just the cemeteries. freemansworn_records is absent
-# deliberately: its header sits on row 1 under a title line, which Task 8 fixes
-# in iter_table_pages' header detection.
+# freemansworn_records is deliberately exempt from EXPECTED_HEADERS below:
+# its header sits on row 1 under a title line ("Freeman's Oaths Taken"), so
+# rows[0] isn't its header the way it is for every other source -- see
+# test_iter_table_pages_skips_a_title_row_via_header_contains.
+_NO_HEADER_EXPECTATION = {"freemansworn_records"}
+
+# Every record table, not just the cemeteries -- the cemetery stems come
+# from import_pdfs.CEMETERIES (the same dict SOURCES is built from) so a
+# newly added cemetery is covered automatically instead of silently
+# skipped; see test_expected_headers_covers_every_source below for the
+# non-cemetery sources.
 EXPECTED_HEADERS = {
-    **{stem: CEMETERY_COLS for stem in (
-        "cloverdale", "eastcambridge", "gates", "hopkins", "jeffersonville",
-        "mtview", "northcambridge", "plainsroad", "riverroad", "smilie",
-        "southcambridge")},
+    **{stem: CEMETERY_COLS for stem in CEMETERIES},
     "birth_records": ["Volume", "Birth Day", "Child", "Family Name", "Father"],
     "marriage_records2": ["Volume", "Marriage Date", "Groom First", "Groom Last",
                           "Bride First", "Bride Last", "Notes"],
     "death_records": ["Volume/Page", "First Name", "Last Name", "Date", "Age"],
     "warningsout_records": ["Volume", "Date of Warning", "Last Name", "First Name"],
 }
+
+
+def test_expected_headers_covers_every_source_except_the_documented_exemption():
+    """A source added to SOURCES (per scripts/README.md's "Adding a source")
+    with no matching entry here would get zero header-detection coverage from
+    test_detect_columns_handles_every_record_table below, and this file would
+    keep passing regardless -- the exact silent-omission risk this pins."""
+    missing = set(SOURCES) - set(EXPECTED_HEADERS) - _NO_HEADER_EXPECTATION
+    assert missing == set(), f"no header expectation for: {sorted(missing)}"
 
 
 @pytest.mark.parametrize("stem,expected", sorted(EXPECTED_HEADERS.items()))

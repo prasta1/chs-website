@@ -1,6 +1,7 @@
 import pytest
 
 from conftest import PDF_DIR
+from scripts.import_pdfs import CEMETERIES
 from scripts.parsers.cemetery import parse_cemetery
 from scripts.parsers.simple import parse_death, parse_warning, parse_freeman
 from scripts.parsers.vital import parse_birth, parse_marriage
@@ -20,9 +21,10 @@ def test_no_cemetery_emits_its_header_as_a_person():
     # All 11 cemetery inventories, not just the ones known to reprint their
     # header on every page -- cloverdale, gates and riverroad print it once
     # (page 1), where a broken parser could still leak it as a fake person.
-    for stem in ("cloverdale", "eastcambridge", "gates", "hopkins",
-                 "jeffersonville", "mtview", "northcambridge", "plainsroad",
-                 "riverroad", "smilie", "southcambridge"):
+    # Derived from import_pdfs.CEMETERIES (the same dict SOURCES is built
+    # from) so a newly added cemetery is covered automatically instead of
+    # silently skipped.
+    for stem in CEMETERIES:
         rows = parse_cemetery(PDF_DIR / f"{stem}.pdf", stem)
         bogus = [a for a in rows if a.surname == "Last Name" or a.given == "First Name"]
         assert bogus == [], f"{stem} emitted {len(bogus)} header rows as people"
