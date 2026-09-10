@@ -157,6 +157,18 @@ def test_check_integrity_flags_missing_surname(conn):
     assert any("surname" in p for p in check_integrity(conn))
 
 
+def test_check_integrity_flags_empty_surname_key(conn):
+    """surname_key is NOT NULL but '' is legal at the schema level, and it's
+    the sole basis of the phonetic search this pipeline exists to power -- a
+    row with surname_key='' is unfindable by any variant search.
+    validate.__main__ is the documented gate; a surname_key regression must
+    fail here, not only in test_golden's full-corpus suite."""
+    make_appearance(conn, surname_key="")
+    conn.commit()
+    from scripts.validate import check_integrity
+    assert any("surname_key" in p for p in check_integrity(conn))
+
+
 # ---- review_report ----
 
 def test_review_report_is_empty_for_a_clean_row(conn):

@@ -76,7 +76,15 @@ def check_counts(conn: sqlite3.Connection, baseline: dict[str, int]) -> list[str
 
 
 def check_integrity(conn: sqlite3.Connection) -> list[str]:
-    """Every appearance must have a real source and a positive page number."""
+    """Every appearance must have a real source, a positive page number, a
+    surname, and a non-empty surname_key.
+
+    surname_key is NOT NULL but '' is legal at the schema level, and it is
+    the sole basis of the phonetic search this pipeline exists to power -- a
+    row with surname_key='' is unfindable by any variant search. This is the
+    documented gate (validate.__main__), so a normalize.surname_key
+    regression must fail here, not only in the golden-corpus test suite.
+    """
     problems = []
     orphans = conn.execute(
         "SELECT COUNT(*) c FROM appearance a LEFT JOIN source s ON s.id=a.source_id"
@@ -95,6 +103,12 @@ def check_integrity(conn: sqlite3.Connection) -> list[str]:
     ).fetchone()["c"]
     if no_name:
         problems.append(f"{no_name} appearances have no surname")
+
+    no_key = conn.execute(
+        "SELECT COUNT(*) c FROM appearance WHERE surname_key IS NULL OR surname_key=''"
+    ).fetchone()["c"]
+    if no_key:
+        problems.append(f"{no_key} appearances have no surname_key")
     return problems
 
 
