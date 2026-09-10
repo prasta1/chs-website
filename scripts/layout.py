@@ -58,7 +58,8 @@ def _intra_heading_threshold(gaps: list[float], jump: float = 1.5) -> float:
     when no gap ratio reaches `jump` — usually a header with no compound
     headings, where every gap already separates columns, but the same 0.0 also
     results if a table's real boundary ratio happens to fall under `jump`,
-    which would silently join every header word into one column. When a table
+    which would silently split every header word into its own column instead
+    of joining a compound heading like "Maiden Name" into one. When a table
     defeats this heuristic, pass `gap` to `detect_columns` explicitly instead
     of lowering `jump` further.
     """
