@@ -53,14 +53,17 @@ def _parse(pdf_path: Path, kind: str, role: str, vol_col: str, date_col: str,
 def parse_death(pdf_path: Path) -> list[Appearance]:
     """Columns: Volume/Page, First Name, Last Name, Date, Age.
 
-    Bounded to the first pass; see DEATH_SECOND_PASS_HEADING above. Age has
-    no column of its own on the Appearance, so it's folded into `detail` —
-    matching how cemetery.py folds Age in for burials.
+    Bounded to the first pass; see DEATH_SECOND_PASS_HEADING above. Age is
+    NOT folded into `detail`: the source table's Age column mis-splits for
+    ages spanning years+months+days (the years token falls left of the
+    column boundary, into date_raw), so folding it would store a truncated,
+    wrong age for some rows. The full age string still survives in
+    raw_line -- a missing fact beats a fabricated one.
     """
     start = find_header_page(pdf_path, DEATH_SECOND_PASS_HEADING)
     last = (start - 1) if start else None
     return _parse(pdf_path, "death", "deceased", "Volume/Page", "Date",
-                  "Last Name", "First Name", last_page=last, detail_col="Age")
+                  "Last Name", "First Name", last_page=last)
 
 
 def parse_warning(pdf_path: Path) -> list[Appearance]:

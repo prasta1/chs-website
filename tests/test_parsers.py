@@ -125,15 +125,6 @@ def test_freeman_extracts_person_and_date():
     assert dexter.role == "sworn"
 
 
-def test_death_folds_age_into_detail_like_cemetery_does():
-    """cemetery.py folds Age into `detail` for burials; simple.py's death
-    parser must agree rather than silently dropping the column."""
-    rows = parse_death(PDF_DIR / "death_records.pdf")
-    with_age = [r for r in rows if r.detail]
-    assert with_age, "expected at least one death row to carry an Age value"
-    assert any("y" in r.detail for r in with_age)
-
-
 def test_death_does_not_leak_the_kinship_and_cause_passes():
     """death_records prints three passes over the same pages: death core
     (Volume/Page, First/Last Name, Date, Age) on pages 1-5, then a
