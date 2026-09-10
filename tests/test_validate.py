@@ -13,13 +13,13 @@ from scripts.db import connect, init_schema
 def make_appearance(conn, source_id=1, surname="Atwood", given="Ruth", page=1,
                     import_key="k1", raw_line="Atwood Ruth 11 Feb 1831",
                     surname_key="ATT", kind="burial", date_raw=None,
-                    date_iso=None, status="active"):
+                    date_iso=None, status="active", edited_at=None, key_seen=1):
     conn.execute(
         "INSERT INTO appearance (source_id,page,import_key,raw_line,surname,"
-        "given,surname_key,kind,status,date_raw,date_iso) VALUES"
-        " (?,?,?,?,?,?,?,?,?,?,?)",
+        "given,surname_key,kind,status,date_raw,date_iso,edited_at,key_seen) VALUES"
+        " (?,?,?,?,?,?,?,?,?,?,?,?,?)",
         (source_id, page, import_key, raw_line, surname, given, surname_key,
-         kind, status, date_raw, date_iso))
+         kind, status, date_raw, date_iso, edited_at, key_seen))
 
 
 @pytest.fixture
@@ -72,6 +72,22 @@ def test_check_counts_fails_just_past_the_tolerance_boundary(conn):
 def test_check_counts_ignores_zero_baseline(conn):
     from scripts.validate import check_counts
     assert check_counts(conn, {"x.pdf": 0}) == []
+
+
+def test_check_counts_flags_nonzero_rows_against_a_zero_baseline(conn):
+    make_appearance(conn)
+    conn.commit()
+    from scripts.validate import check_counts
+    problems = check_counts(conn, {"x.pdf": 0})
+    assert any("x.pdf" in p for p in problems)
+
+
+def test_check_counts_flags_a_db_source_missing_from_the_baseline(conn):
+    # conn's fixture already inserted the 'x.pdf' source; an empty baseline
+    # has no entry for it at all.
+    from scripts.validate import check_counts
+    problems = check_counts(conn, {})
+    assert any("x.pdf" in p for p in problems)
 
 
 def test_check_counts_only_counts_active_rows(conn):
@@ -183,6 +199,50 @@ def test_review_report_flags_a_merged_word_token(conn):
 def test_review_report_does_not_flag_ordinary_names_as_merged(conn):
     make_appearance(conn, surname="Atwood", given="Ruth",
                     raw_line="Atwood Ruth Burns Cloverdale 1831")
+    conn.commit()
+    from scripts.validate import review_report
+    assert review_report(conn) == []
+
+
+def test_review_report_flags_a_likely_reversed_name(conn):
+    """A surname vanishingly rare in the corpus (<=1, i.e. only this row)
+    paired with a given name whose first token is common as a surname
+    elsewhere (>=5) looks like the two fields got swapped in transcription --
+    the shape of the spec's own exemplar, Cloverdale's Alida/Seeley row."""
+    for i in range(5):
+        make_appearance(conn, import_key=f"seeley{i}", surname="Seeley",
+                        given=f"Person{i}")
+    make_appearance(conn, import_key="reversed", surname="Alida", given="Seeley")
+    conn.commit()
+    from scripts.validate import review_report
+    flags = [f for f in review_report(conn) if f["name"] == "Alida, Seeley"]
+    assert flags, "expected the reversed-looking row to be flagged"
+    assert "name may be reversed" in flags[0]["reasons"]
+
+
+def test_review_report_does_not_flag_a_common_surname_as_reversed(conn):
+    for i in range(5):
+        make_appearance(conn, import_key=f"atwood{i}", surname="Atwood",
+                        given=f"Person{i}")
+    conn.commit()
+    from scripts.validate import review_report
+    assert not any("name may be reversed" in f["reasons"] for f in review_report(conn))
+
+
+def test_review_report_flags_an_edited_row_whose_key_went_stale(conn):
+    """A hand correction whose source line changed or vanished is never
+    retired (see import_pdfs.upsert) but must surface for a human to
+    reconcile against the current PDF text."""
+    make_appearance(conn, import_key="edited", edited_at="2026-01-01", key_seen=0)
+    conn.commit()
+    from scripts.validate import review_report
+    flags = review_report(conn)
+    assert len(flags) == 1
+    assert flags[0]["reasons"] == ["hand correction's source line has changed or vanished"]
+
+
+def test_review_report_does_not_flag_an_edited_row_whose_key_is_current(conn):
+    make_appearance(conn, import_key="edited", edited_at="2026-01-01", key_seen=1)
     conn.commit()
     from scripts.validate import review_report
     assert review_report(conn) == []

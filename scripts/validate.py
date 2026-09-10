@@ -8,9 +8,9 @@ import sqlite3
 from pathlib import Path
 
 from scripts.import_pdfs import SOURCES
-from scripts.layout import iter_table_pages
-from scripts.parsers.simple import DEATH_SECOND_PASS_HEADING, _pass1_last_page
-from scripts.parsers.vital import _second_pass_start
+from scripts.layout import find_header_page, iter_table_pages
+from scripts.parsers.simple import DEATH_SECOND_PASS_HEADING
+from scripts.parsers.vital import SECOND_PASS_HEADING
 
 TOLERANCE = 0.02  # 2% drift allowed before a source is considered broken
 
@@ -44,7 +44,12 @@ def _source_row_key(import_key: str) -> str:
 
 
 def check_counts(conn: sqlite3.Connection, baseline: dict[str, int]) -> list[str]:
-    """Compare per-source active row counts against the committed baseline."""
+    """Compare per-source active row counts against the committed baseline.
+
+    Also flags a source present in the database but absent from the
+    baseline entirely -- a new SOURCES entry whose baseline was never
+    regenerated would otherwise go completely ungated.
+    """
     problems = []
     for filename, expected in baseline.items():
         row = conn.execute(
@@ -52,9 +57,15 @@ def check_counts(conn: sqlite3.Connection, baseline: dict[str, int]) -> list[str
             " WHERE s.filename=? AND a.status='active'", (filename,)).fetchone()
         got = row["c"]
         if expected == 0:
+            if got:
+                problems.append(f"{filename}: expected 0, got {got}")
             continue
         if abs(got - expected) / expected > TOLERANCE:
             problems.append(f"{filename}: expected ~{expected}, got {got}")
+
+    db_files = {r["filename"] for r in conn.execute("SELECT DISTINCT filename FROM source")}
+    for filename in sorted(db_files - set(baseline)):
+        problems.append(f"{filename}: source in the database has no baseline entry")
     return problems
 
 
@@ -81,19 +92,29 @@ def check_integrity(conn: sqlite3.Connection) -> list[str]:
     return problems
 
 
+# stem -> the heading that marks a later pass's header, for the two wide
+# tables printed in passes (see vital.py / simple.py). Reuses the parsers'
+# own heading constants and scripts.layout.find_header_page, the same
+# lookup the real parsers use, rather than a second, independent
+# implementation of the page scan -- only the stem-to-heading mapping is
+# inherently source-specific and has to live here.
+_SECOND_PASS_HEADINGS = {
+    "birth_records": SECOND_PASS_HEADING,
+    "death_records": DEATH_SECOND_PASS_HEADING,
+}
+
+
 def _parser_bounds(stem: str, pdf_path: Path) -> dict:
     """The page range / header hint the real parser for `stem` uses.
 
-    Reuses each parser's own pass-boundary detector (rather than re-deriving
+    Reuses each parser's own pass-boundary heading (rather than re-deriving
     it) so rows_in below counts exactly the rows the parser looked at -- not
     the whole file, which for a bounded wide-table PDF like birth/death would
     double-count the second pass and make the reconciliation meaningless.
     """
-    if stem == "birth_records":
-        start = _second_pass_start(pdf_path)
+    if stem in _SECOND_PASS_HEADINGS:
+        start = find_header_page(pdf_path, _SECOND_PASS_HEADINGS[stem])
         return {"last_page": (start - 1) if start else None}
-    if stem == "death_records":
-        return {"last_page": _pass1_last_page(pdf_path, DEATH_SECOND_PASS_HEADING)}
     if stem == "freemansworn_records":
         return {"header_contains": "Volume"}
     return {}
@@ -143,22 +164,40 @@ def reconcile(conn: sqlite3.Connection, pdf_dir: Path) -> dict[str, dict]:
 def review_report(conn: sqlite3.Connection) -> list[dict]:
     """Rows a human should look at. Never auto-corrected.
 
-    Flags names that look reversed or malformed -- Cloverdale's first row
-    parses as surname 'Alida', given name 'Seeley', likely reversed in the
-    original transcription rather than misparsed. Guessing here would launder
-    a real transcription error into the archive as verified fact.
+    Flags names that look reversed -- Cloverdale's first row parses as
+    surname 'Alida', given name 'Seeley'. The signal is corpus-derived, never
+    a hardcoded name list: count how often each token appears as a *surname*
+    across the whole corpus, then flag a row whose surname is vanishingly
+    rare (<=1, i.e. only this row) while its given name's first token is
+    common as a surname elsewhere (>=5) -- exactly the shape of two fields
+    swapped in transcription. Guessing which way round they go would launder
+    a real transcription error into the archive as verified fact, so this
+    only flags for a human, never corrects.
 
     Also flags a raw_line carrying a merged-word artifact -- a token with a
     lowercase letter immediately followed by an uppercase one, e.g.
     "AlexanderWilley". There's no principled way to know where the word
     boundary falls, so this is surfaced for a human to fix by consulting the
     original document, never split automatically.
+
+    Also flags a hand correction whose source line has changed or vanished:
+    an active row with `edited_at` set but whose `import_key` went unseen in
+    the most recent import (see `key_seen` and scripts/import_pdfs.upsert).
+    Such a row is never retired -- the human correction stays authoritative
+    -- but it needs a human to reconcile it against the PDF's current text.
     """
     flags = []
     rows = conn.execute(
         "SELECT a.id, a.surname, a.given, a.date_raw, a.date_iso, a.page,"
-        " a.raw_line, s.filename FROM appearance a JOIN source s ON"
-        " s.id=a.source_id WHERE a.status='active'").fetchall()
+        " a.raw_line, a.edited_at, a.key_seen, s.filename FROM appearance a"
+        " JOIN source s ON s.id=a.source_id WHERE a.status='active'").fetchall()
+
+    # Frequency of each token as a surname across the corpus, computed once.
+    sur: dict[str, int] = {}
+    for r in rows:
+        if r["surname"]:
+            sur[r["surname"]] = sur.get(r["surname"], 0) + 1
+
     for r in rows:
         reasons = []
         if r["date_raw"] and not r["date_iso"]:
@@ -169,9 +208,15 @@ def review_report(conn: sqlite3.Connection) -> list[dict]:
             reasons.append("no given name")
         if r["surname"] and not r["surname"][0].isupper():
             reasons.append("surname not capitalised")
+        given_tokens = (r["given"] or "").split()
+        if (given_tokens and sur.get(r["surname"], 0) <= 1
+                and sur.get(given_tokens[0], 0) >= 5):
+            reasons.append("name may be reversed")
         if r["raw_line"] and any(MERGE_PATTERN.search(tok)
                                  for tok in r["raw_line"].split()):
             reasons.append("possible merged words in raw_line")
+        if r["edited_at"] and not r["key_seen"]:
+            reasons.append("hand correction's source line has changed or vanished")
         if reasons:
             flags.append({"id": r["id"], "file": r["filename"], "page": r["page"],
                           "name": f"{r['surname']}, {r['given']}",
