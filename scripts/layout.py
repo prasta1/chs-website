@@ -42,7 +42,7 @@ def group_rows(words: list[Word], tol: float = 3.0) -> list[list[Word]]:
     return rows
 
 
-def _intra_heading_threshold(gaps: list[float], jump: float = 2.0) -> float:
+def _intra_heading_threshold(gaps: list[float], jump: float = 1.5) -> float:
     """Separate intra-heading spacing from inter-column spacing.
 
     Header gaps are bimodal: a few tight gaps inside compound headings like
@@ -50,8 +50,17 @@ def _intra_heading_threshold(gaps: list[float], jump: float = 2.0) -> float:
     use different letter-tracking, so the absolute values differ per file while
     the ratio at the boundary does not. The first sorted-gap ratio jump of
     `jump` or more marks that boundary; the threshold sits at the geometric mean
-    of the pair. Returns 0.0 when no such jump exists — a header with no
-    compound headings, where every gap separates columns.
+    of the pair.
+
+    Measured across all sixteen record tables, that boundary ratio runs from
+    1.82 (marriages) to 9.48 (Gates); `jump=1.5` sits under the tightest real
+    boundary with margin, while still catching every genuine jump. Returns 0.0
+    when no gap ratio reaches `jump` — usually a header with no compound
+    headings, where every gap already separates columns, but the same 0.0 also
+    results if a table's real boundary ratio happens to fall under `jump`,
+    which would silently join every header word into one column. When a table
+    defeats this heuristic, pass `gap` to `detect_columns` explicitly instead
+    of lowering `jump` further.
     """
     ordered = sorted(g for g in gaps if g > 0)
     for a, b in zip(ordered, ordered[1:]):

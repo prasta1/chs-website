@@ -1,3 +1,5 @@
+import pytest
+
 from conftest import PDF_DIR
 from scripts.extract import extract_words
 from scripts.layout import group_rows, detect_columns, assign_columns, iter_table_pages
@@ -56,6 +58,36 @@ def test_detect_columns_honours_an_explicit_gap_override():
     rows = rows_for("cloverdale")
     # 0.0 forces every gap to separate columns, splitting compound headings.
     assert [c.name for c in detect_columns(rows[0], gap=0.0)][:2] == ["Last", "Name"]
+
+
+CEMETERY_COLS = ["Last Name", "First Name", "Maiden Name", "Born", "Died", "Age"]
+
+# Every record table, not just the cemeteries. freemansworn_records is absent
+# deliberately: its header sits on row 1 under a title line, which Task 8 fixes
+# in iter_table_pages' header detection.
+EXPECTED_HEADERS = {
+    **{stem: CEMETERY_COLS for stem in (
+        "cloverdale", "eastcambridge", "gates", "hopkins", "jeffersonville",
+        "mtview", "northcambridge", "plainsroad", "riverroad", "smilie",
+        "southcambridge")},
+    "birth_records": ["Volume", "Birth Day", "Child", "Family Name", "Father"],
+    "marriage_records2": ["Volume", "Marriage Date", "Groom First", "Groom Last",
+                          "Bride First", "Bride Last", "Notes"],
+    "death_records": ["Volume/Page", "First Name", "Last Name", "Date", "Age"],
+    "warningsout_records": ["Volume", "Date of Warning", "Last Name", "First Name"],
+}
+
+
+@pytest.mark.parametrize("stem,expected", sorted(EXPECTED_HEADERS.items()))
+def test_detect_columns_handles_every_record_table(stem, expected):
+    """One threshold must serve every record type, not just the cemeteries.
+
+    Letter-tracking differs per file, so the boundary ratio between intra-heading
+    and inter-column spacing ranges from 1.82 (marriages) to 9.48 (Gates).
+    """
+    rows = rows_for(stem)
+    names = [c.name for c in detect_columns(rows[0])]
+    assert names[:len(expected)] == expected
 
 
 def test_iter_table_pages_reads_header_once_and_reuses_columns():
