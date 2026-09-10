@@ -37,11 +37,50 @@ def test_golden_ruth_atwood(conn):
     assert r["place"] == "Cloverdale Cemetery"
 
 
+def test_place_never_carries_a_volume_citation(conn):
+    """'place' and a source-book citation like 'Bk. A p. 147' are different
+    kinds of fact -- one is a real place, the other is provenance -- and
+    Phase 2's place filter needs a clean vocabulary. No active row's `place`
+    should look like a citation."""
+    leaked = q(conn, "SELECT COUNT(*) c FROM appearance WHERE status='active'"
+                     " AND place LIKE 'Bk%'")[0]["c"]
+    assert leaked == 0
+
+
+def test_volume_carries_the_book_citation_for_town_and_vital_records(conn):
+    total = q(conn, "SELECT COUNT(*) c FROM appearance WHERE status='active'"
+                    " AND kind IN ('birth','marriage','death','warning','freeman')"
+                    )[0]["c"]
+    with_volume = q(conn, "SELECT COUNT(*) c FROM appearance WHERE status='active'"
+                          " AND kind IN ('birth','marriage','death','warning','freeman')"
+                          " AND volume IS NOT NULL")[0]["c"]
+    assert total > 0
+    assert with_volume == total
+
+
 def test_golden_phonetic_search_finds_variants(conn):
-    from scripts.normalize import surname_key
-    rows = q(conn, "SELECT DISTINCT surname FROM appearance WHERE surname_key=?",
-             surname_key("Atwood"))
-    assert len(rows) >= 1
+    """The phonetic index exists to group spelling variants (Atwood /
+    Attwood / Atwoode) under one key. surname_key('Atwood') resolves to
+    exactly one spelling in this corpus, so asserting >=1 there is trivially
+    true whether or not grouping actually works. Instead, derive surname_keys
+    that genuinely carry 2+ distinct spellings from the corpus itself (186
+    of them exist) and assert the index groups many of them.
+
+    The threshold is deliberately >=50, not >=1: a broken key function that
+    merely uppercases the surname (no real phonetic folding) still produces
+    a couple of accidental groups in this corpus from bare case differences
+    (e.g. 'Macomber'/'MaComber' both uppercase to 'MACOMBER') -- >=1 would
+    pass against that broken code just as easily as against the real one.
+    """
+    grouped = q(conn, "SELECT surname_key, COUNT(DISTINCT surname) n FROM"
+                      " appearance GROUP BY surname_key HAVING n >= 2")
+    assert len(grouped) >= 50, (
+        f"expected the phonetic index to group many spelling variants,"
+        f" got only {len(grouped)}")
+    key = grouped[0]["surname_key"]
+    variants = q(conn, "SELECT DISTINCT surname FROM appearance WHERE surname_key=?",
+                key)
+    assert len(variants) >= 2
 
 
 def test_every_appearance_has_a_surname_key(conn):
@@ -77,3 +116,15 @@ def test_review_report_flags_a_known_merged_word_row(conn):
     assert any(f["name"].startswith("RusselHawley") and
                any("merged" in reason.lower() for reason in f["reasons"])
                for f in flags)
+
+
+def test_review_report_flags_the_spec_named_reversed_row(conn):
+    """The spec's own exemplar for this check: Cloverdale's first row parses
+    as surname 'Alida', given 'Seeley' -- almost certainly reversed in the
+    original transcription (Seeley is a common surname elsewhere in this
+    corpus; Alida is not, as a surname, anywhere else)."""
+    from scripts.validate import review_report
+    flags = review_report(conn)
+    target = [f for f in flags if f["name"] == "Alida, Seeley"]
+    assert target, "expected the Alida/Seeley row to be flagged as possibly reversed"
+    assert "name may be reversed" in target[0]["reasons"]
