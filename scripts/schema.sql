@@ -23,7 +23,8 @@ CREATE TABLE IF NOT EXISTS appearance (
   pair_key    TEXT,
   date_raw    TEXT,
   date_iso    TEXT,
-  place       TEXT,
+  place       TEXT,       -- a real place name (e.g. a cemetery); not a citation
+  volume      TEXT,       -- source-book citation (e.g. 'Bk. A p. 147'), provenance not place
   detail      TEXT,
 
   origin      TEXT NOT NULL DEFAULT 'imported',
@@ -31,7 +32,11 @@ CREATE TABLE IF NOT EXISTS appearance (
   verified    INTEGER NOT NULL DEFAULT 0,
   note        TEXT,
   edited_at   TEXT,
-  edited_by   TEXT
+  edited_by   TEXT,
+  -- 1 if this row's import_key was present in the most recent import; 0
+  -- means an edited row's key went missing (source line changed or the row
+  -- vanished) -- the row is never retired for this, only flagged for review.
+  key_seen    INTEGER NOT NULL DEFAULT 1
 );
 
 CREATE INDEX IF NOT EXISTS idx_appearance_surname     ON appearance(surname);
