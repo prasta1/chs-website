@@ -44,7 +44,13 @@ def _source_row_key(import_key: str) -> str:
 
 
 def check_counts(conn: sqlite3.Connection, baseline: dict[str, int]) -> list[str]:
-    """Compare per-source active row counts against the committed baseline.
+    """Compare per-source active *imported* row counts against the baseline.
+
+    Scoped to origin='imported' -- the baseline measures what the PDF parse
+    produced. A volunteer can add a person who appears in no PDF
+    (origin='manual', import_key NULL; see upsert()'s NULL-key filter), and
+    that must never count as drift against an extraction baseline that knows
+    nothing about it.
 
     Also flags a source present in the database but absent from the
     baseline entirely -- a new SOURCES entry whose baseline was never
@@ -54,7 +60,8 @@ def check_counts(conn: sqlite3.Connection, baseline: dict[str, int]) -> list[str
     for filename, expected in baseline.items():
         row = conn.execute(
             "SELECT COUNT(*) c FROM appearance a JOIN source s ON s.id=a.source_id"
-            " WHERE s.filename=? AND a.status='active'", (filename,)).fetchone()
+            " WHERE s.filename=? AND a.status='active' AND a.origin='imported'",
+            (filename,)).fetchone()
         got = row["c"]
         if expected == 0:
             if got:

@@ -90,6 +90,26 @@ def test_check_counts_flags_a_db_source_missing_from_the_baseline(conn):
     assert any("x.pdf" in p for p in problems)
 
 
+def test_check_counts_ignores_manual_rows_not_in_any_pdf(conn):
+    """The schema's origin='manual' + nullable import_key exist so a
+    volunteer can add someone who appears in no PDF (spec: 'editors can ...
+    add a record that exists in no PDF'). check_counts measures the
+    extraction, not what a human later adds on top of it -- manual rows must
+    never count as drift against a baseline that only knows the PDF."""
+    for i in range(100):
+        make_appearance(conn, import_key=f"k{i}")
+    # 5 manual, PDF-absent rows on top of 100 imported: 5% drift if origin
+    # leaks into the count -- well past 2% tolerance -- 0% if it doesn't.
+    for i in range(5):
+        conn.execute(
+            "INSERT INTO appearance (source_id,page,import_key,raw_line,"
+            "surname,given,surname_key,kind,origin) VALUES"
+            " (1,1,NULL,NULL,'Smith',?,'SMT','burial','manual')", (f"Person{i}",))
+    conn.commit()
+    from scripts.validate import check_counts
+    assert check_counts(conn, {"x.pdf": 100}) == []
+
+
 def test_check_counts_only_counts_active_rows(conn):
     # 3 retired rows on top of 100 active is a 3% drift if retired rows leak
     # into the count -- well past the 2% tolerance -- but 0% if they don't.
