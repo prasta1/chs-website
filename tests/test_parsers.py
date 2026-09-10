@@ -59,3 +59,17 @@ def test_marriage_emits_both_parties_sharing_a_pair_key():
 def test_vital_rows_are_plausible_in_number():
     assert 1000 <= len(parse_birth(PDF_DIR / "birth_records.pdf")) <= 4000
     assert 800 <= len(parse_marriage(PDF_DIR / "marriage_records2.pdf")) <= 1200
+
+
+def test_birth_recovers_the_mother_from_the_second_pass():
+    rows = parse_birth(PDF_DIR / "birth_records.pdf")
+    child = [r for r in rows if r.given == "Adalia Ellen" and r.role == "child"][0]
+    mother = [r for r in rows if r.pair_key == child.pair_key and r.role == "mother"][0]
+    assert mother.surname == "Adams"          # family surname, as with fathers
+    assert mother.given                        # she has a given name
+    assert mother.date_iso == child.date_iso
+
+
+def test_birth_second_pass_does_not_leak_note_fragments_as_people():
+    rows = parse_birth(PDF_DIR / "birth_records.pdf")
+    assert not [r for r in rows if '"' in r.surname or "oclock" in (r.given or "")]

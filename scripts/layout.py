@@ -116,14 +116,17 @@ def assign_columns(row: list[Word], cols: list[Column]) -> dict[str, str]:
     return {name: " ".join(parts) for name, parts in out.items()}
 
 
-def iter_table_pages(pdf_path: Path):
+def iter_table_pages(pdf_path: Path, first_page: int = 1, last_page: int | None = None):
     """Yield (page, columns, data_rows) for a table PDF.
 
     Columns are read from the header row on the first page that has one and
-    reused for later pages, which carry data rows only.
+    reused for later pages, which carry data rows only. `first_page`/`last_page`
+    restrict the range — a wide table is sometimes printed as two passes over the
+    document, each pass carrying a different set of columns and its own header.
     """
+    end = page_count(pdf_path) if last_page is None else last_page
     cols = None
-    for page in range(1, page_count(pdf_path) + 1):
+    for page in range(first_page, end + 1):
         rows = group_rows(extract_words(pdf_path, page))
         if not rows:
             continue
