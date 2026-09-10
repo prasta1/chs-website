@@ -100,3 +100,16 @@ def test_iter_table_pages_reads_header_once_and_reuses_columns():
         "later pages must reuse the columns detected on the first"
     assert not {"Last", "Name", "First"}.issubset({w.text for w in rows[0]}), \
         "the header row must be consumed, not yielded as data"
+
+
+def test_iter_table_pages_skips_a_title_row_via_header_contains():
+    """freemansworn_records prints a caption ("Freeman's Oaths Taken") above
+    its real header; header_contains lets the caller name a word only the
+    real header carries, so the caption is dropped instead of misread as columns.
+    """
+    pages = list(iter_table_pages(PDF_DIR / "freemansworn_records.pdf",
+                                  header_contains="Volume"))
+    _, cols, rows = pages[0]
+    assert [c.name for c in cols] == ["Volume", "Date of Oath", "First Name", "Last Name"]
+    assert not any("Oaths" in w.text for w in rows[0]), \
+        "the title row must be dropped, not yielded as data"

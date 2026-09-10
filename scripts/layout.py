@@ -116,13 +116,17 @@ def assign_columns(row: list[Word], cols: list[Column]) -> dict[str, str]:
     return {name: " ".join(parts) for name, parts in out.items()}
 
 
-def iter_table_pages(pdf_path: Path, first_page: int = 1, last_page: int | None = None):
+def iter_table_pages(pdf_path: Path, first_page: int = 1, last_page: int | None = None,
+                     header_contains: str | None = None):
     """Yield (page, columns, data_rows) for a table PDF.
 
     Columns are read from the header row on the first page that has one and
     reused for later pages, which carry data rows only. `first_page`/`last_page`
     restrict the range — a wide table is sometimes printed as two passes over the
     document, each pass carrying a different set of columns and its own header.
+    `header_contains` names a word the header is known to carry, so leading
+    title rows are skipped rather than mistaken for the header — some of these
+    tables print a caption line above their column names.
     """
     end = page_count(pdf_path) if last_page is None else last_page
     cols = None
@@ -132,6 +136,12 @@ def iter_table_pages(pdf_path: Path, first_page: int = 1, last_page: int | None 
             continue
         start = 0
         if cols is None:
-            cols = detect_columns(rows[0])
-            start = 1
+            header_idx = 0
+            if header_contains is not None:
+                header_idx = next(
+                    i for i, row in enumerate(rows)
+                    if any(w.text == header_contains for w in row)
+                )
+            cols = detect_columns(rows[header_idx])
+            start = header_idx + 1
         yield page, cols, rows[start:]
