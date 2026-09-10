@@ -1,7 +1,8 @@
 import pytest
 
+import scripts.layout as layout
 from conftest import PDF_DIR
-from scripts.extract import extract_words
+from scripts.extract import Word, extract_words
 from scripts.layout import group_rows, detect_columns, assign_columns, iter_table_pages
 
 
@@ -145,6 +146,44 @@ def test_iter_table_pages_skips_a_title_row_via_header_contains():
     assert [c.name for c in cols] == ["Volume", "Date of Oath", "First Name", "Last Name"]
     assert not any("Oaths" in w.text for w in rows[0]), \
         "the title row must be dropped, not yielded as data"
+
+
+def test_iter_table_pages_skips_a_leading_cover_page_via_header_contains(monkeypatch):
+    """A cover/title page that comes BEFORE the header, as its own page
+    rather than as an extra row above the header on the same page (see
+    test_iter_table_pages_skips_a_title_row_via_header_contains for that
+    case), must not abort the read -- the docstring says the header is
+    found on the first page that has one, so a page with no match should be
+    skipped, not treated as an error. Only once no page in the whole range
+    matches should this raise (see
+    test_iter_table_pages_raises_a_clear_error_for_an_unmatched_header_contains).
+
+    None of the 16 real record PDFs happen to have this exact shape (a
+    whole separate cover page ahead of the header page), so the extraction
+    boundary (extract_words/page_count) is faked here -- the real
+    group_rows/detect_columns/assign_columns/header-matching machinery
+    under test runs unmodified, the same pattern
+    test_paired_mothers_rejects_a_page_offset_mismatch in test_parsers.py
+    uses to isolate a boundary case with no real-file example.
+    """
+    cover = [Word(text="Cover", x0=0, x1=20, y0=0, y1=10)]
+    header = [Word(text="Volume", x0=0, x1=20, y0=0, y1=10),
+              Word(text="Name", x0=40, x1=60, y0=0, y1=10)]
+    data = [Word(text="1", x0=0, x1=10, y0=20, y1=30),
+            Word(text="Smith", x0=40, x1=60, y0=20, y1=30)]
+    pages = {1: cover, 2: header, 3: data}
+
+    monkeypatch.setattr(layout, "extract_words", lambda path, page: pages.get(page, []))
+    monkeypatch.setattr(layout, "page_count", lambda path: 3)
+
+    out = list(layout.iter_table_pages(PDF_DIR / "fake.pdf", header_contains="Volume"))
+
+    header_page, cols, _ = out[0]
+    assert header_page == 2, "cover page 1 must be skipped, not mistaken for the header"
+    assert [c.name for c in cols] == ["Volume", "Name"]
+
+    data_pages = [(p, [w.text for row in rows for w in row]) for p, _, rows in out if rows]
+    assert data_pages == [(3, ["1", "Smith"])]
 
 
 def test_iter_table_pages_drops_headers_reprinted_on_later_pages():

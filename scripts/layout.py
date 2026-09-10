@@ -128,15 +128,18 @@ def iter_table_pages(pdf_path: Path, first_page: int = 1, last_page: int | None 
                      header_contains: str | None = None, gap: float | None = None):
     """Yield (page, columns, data_rows) for a table PDF.
 
-    Columns are read from the header row on the first page that has one and
-    reused for later pages, which carry data rows only. `first_page`/`last_page`
-    restrict the range — a wide table is sometimes printed as two passes over the
-    document, each pass carrying a different set of columns and its own header.
-    `header_contains` names a word the header is known to carry, so leading
-    title rows are skipped rather than mistaken for the header — some of these
-    tables print a caption line above their column names. `gap` is forwarded
-    to `detect_columns` as an explicit intra-heading threshold, overriding the
-    per-file derived one, for the rare table that defeats the heuristic.
+    Without `header_contains`, the header is the first row of the first page
+    that has any rows at all -- there's no way to tell a title page from a
+    header page without knowing a word to look for. With `header_contains`,
+    the header is the first row (searched page by page, in order over the
+    whole range) that contains that word: a leading cover or title page with
+    no matching row is skipped rather than raising, so the search only fails
+    once no page in the whole range matches. `first_page`/`last_page`
+    restrict the range — a wide table is sometimes printed as two passes over
+    the document, each pass carrying a different set of columns and its own
+    header. `gap` is forwarded to `detect_columns` as an explicit
+    intra-heading threshold, overriding the per-file derived one, for the
+    rare table that defeats the heuristic.
 
     Most of these tables reprint their column header on every page, not just
     the first. A repeated header is not a record, so any row whose word texts
@@ -160,16 +163,22 @@ def iter_table_pages(pdf_path: Path, first_page: int = 1, last_page: int | None 
                     None,
                 )
                 if header_idx is None:
-                    raise ValueError(
-                        f"{pdf_path.name} page {page}: no row contains the header "
-                        f"word {header_contains!r}"
-                    )
+                    # A cover/title page with no matching row -- try the next
+                    # page rather than aborting; see the loop's own trailing
+                    # raise for the case where no page in range matches.
+                    continue
             cols = detect_columns(rows[header_idx], gap=gap)
             header_texts = tuple(w.text for w in rows[header_idx])
             start = header_idx + 1
         data_rows = [r for r in rows[start:]
                      if tuple(w.text for w in r) != header_texts]
         yield page, cols, data_rows
+
+    if cols is None and header_contains is not None:
+        raise ValueError(
+            f"{pdf_path.name}: no page in range {first_page}-{end} contains a "
+            f"row with the header word {header_contains!r}"
+        )
 
 
 def find_header_page(pdf_path: Path, heading: list[str]) -> int | None:
