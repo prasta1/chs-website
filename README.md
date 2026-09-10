@@ -62,6 +62,15 @@ off. Filtering, the video-only toggle and the order total are the enhancement.
   never states a title, and names the co-author "Matt Safford" where the cover reads
   "Madison D. Safford" — worth confirming with CHS.
 
+## Searchable archive
+
+`data/archive.sqlite` holds a person-level index extracted from 16 of the 22
+tabular record PDFs (cemetery inventories, birth/marriage/death records, and
+town records) — 9,665 active appearances. See `scripts/README.md` to rebuild
+it or add a source, and
+`docs/superpowers/specs/2026-09-09-chs-archive-search-design.md` for the
+design.
+
 ## Local preview
 
 ```
