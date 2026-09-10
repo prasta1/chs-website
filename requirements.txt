@@ -1,0 +1,2 @@
+pytest==8.3.4
+metaphone==0.6
