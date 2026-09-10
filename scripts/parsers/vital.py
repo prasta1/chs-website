@@ -13,8 +13,12 @@ from scripts.parsers import Appearance
 # birth_records.pdf prints as a wide table in two passes over the same pages:
 # pass one carries Volume/Birth Day/Child/Family Name/Father, pass two carries
 # Mother/Notes for the same rows in the same order. Found by its own header
-# text rather than a hardcoded page number, so a single-pass file just returns
-# None below and parse_birth behaves exactly as before.
+# text rather than a hardcoded page number, so a differently-paginated
+# reprint doesn't silently misalign. birth_records is known multi-pass, so a
+# None here always means the heading text changed or moved -- parse_birth
+# raises rather than silently falling through to an unbounded page range,
+# which would parse the second pass with the first pass's columns and
+# manufacture fake people.
 SECOND_PASS_HEADING = ["Mother", "Notes"]
 
 
@@ -53,11 +57,16 @@ def _paired_mothers(pdf_path: Path, second_start: int, pass1_pages: list) -> lis
 
 
 def parse_birth(pdf_path: Path) -> list[Appearance]:
-    """Columns: Volume, Birth Day, Child, Family Name, Father[, Mother, Notes]."""
+    """Columns: Volume, Birth Day, Child, Family Name, Father, Mother, Notes."""
     second_start = find_header_page(pdf_path, SECOND_PASS_HEADING)
-    last1 = (second_start - 1) if second_start is not None else None
-    pass1_pages = list(iter_table_pages(pdf_path, last_page=last1))
-    mothers = _paired_mothers(pdf_path, second_start, pass1_pages) if second_start else []
+    if second_start is None:
+        raise ValueError(
+            f"{pdf_path.name}: expected second-pass heading {SECOND_PASS_HEADING} "
+            "not found -- birth_records is known multi-pass, so this means the "
+            "heading text moved or changed, not that there is no second pass"
+        )
+    pass1_pages = list(iter_table_pages(pdf_path, last_page=second_start - 1))
+    mothers = _paired_mothers(pdf_path, second_start, pass1_pages)
 
     out: list[Appearance] = []
     idx = 0

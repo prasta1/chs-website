@@ -104,6 +104,20 @@ def test_paired_mothers_rejects_a_page_offset_mismatch(monkeypatch):
                               pass1_pages=pass1_pages)
 
 
+def test_parse_birth_raises_loudly_when_the_second_pass_header_is_missing(monkeypatch):
+    """birth_records is known multi-pass; find_header_page returning None here
+    must mean the heading text changed or moved, never 'no second pass' --
+    silently falling through to an unbounded range is exactly how pass-two
+    rows get parsed with pass-one's columns and manufacture fake people (see
+    test_birth_second_pass_does_not_leak_note_fragments_as_people, which
+    guards the case where the header IS found)."""
+    import scripts.parsers.vital as vital
+
+    monkeypatch.setattr(vital, "find_header_page", lambda *a, **kw: None)
+    with pytest.raises(ValueError, match="second-pass"):
+        parse_birth(PDF_DIR / "birth_records.pdf")
+
+
 def test_death_extracts_person_and_date():
     rows = parse_death(PDF_DIR / "death_records.pdf")
     levi = [r for r in rows if r.surname == "Atwood" and r.given == "Levi"][0]
@@ -137,6 +151,15 @@ def test_death_does_not_leak_the_kinship_and_cause_passes():
     """
     rows = parse_death(PDF_DIR / "death_records.pdf")
     assert all(r.date_raw for r in rows)
+
+
+def test_parse_death_raises_loudly_when_the_second_pass_header_is_missing(monkeypatch):
+    """Same guarantee as parse_birth, for death_records's three-pass table."""
+    import scripts.parsers.simple as simple
+
+    monkeypatch.setattr(simple, "find_header_page", lambda *a, **kw: None)
+    with pytest.raises(ValueError, match="second-pass"):
+        parse_death(PDF_DIR / "death_records.pdf")
 
 
 def test_simple_parsers_have_plausible_counts():

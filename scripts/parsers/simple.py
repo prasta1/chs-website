@@ -14,7 +14,11 @@ from scripts.parsers import Appearance
 # for the same rows, then a Cause table — the same wide-table-in-passes shape
 # birth_records uses (see vital.py), but with no columns this parser wants.
 # Found by its own header text rather than a hardcoded page number, so a
-# single-pass file just returns None below and the page range is unbounded.
+# differently-paginated reprint doesn't silently misalign. death_records is
+# known multi-pass, so a None here always means the heading text changed or
+# moved -- parse_death raises rather than silently falling through to an
+# unbounded page range, which would parse the later passes with the death
+# core's columns and manufacture fake death rows.
 DEATH_SECOND_PASS_HEADING = ["Father", "Mother", "Spouse"]
 
 
@@ -61,9 +65,15 @@ def parse_death(pdf_path: Path) -> list[Appearance]:
     raw_line -- a missing fact beats a fabricated one.
     """
     start = find_header_page(pdf_path, DEATH_SECOND_PASS_HEADING)
-    last = (start - 1) if start is not None else None
+    if start is None:
+        raise ValueError(
+            f"{pdf_path.name}: expected second-pass heading "
+            f"{DEATH_SECOND_PASS_HEADING} not found -- death_records is known "
+            "multi-pass, so this means the heading text moved or changed, not "
+            "that there is no second pass"
+        )
     return _parse(pdf_path, "death", "deceased", "Volume/Page", "Date",
-                  "Last Name", "First Name", last_page=last)
+                  "Last Name", "First Name", last_page=start - 1)
 
 
 def parse_warning(pdf_path: Path) -> list[Appearance]:
