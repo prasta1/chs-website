@@ -5,8 +5,7 @@ the column names and the event kind differ.
 """
 from pathlib import Path
 
-from scripts.extract import extract_words, page_count
-from scripts.layout import assign_columns, group_rows, iter_table_pages
+from scripts.layout import assign_columns, find_header_page, iter_table_pages
 from scripts.normalize import import_key, parse_date, surname_key
 from scripts.parsers import Appearance
 
@@ -19,18 +18,10 @@ from scripts.parsers import Appearance
 DEATH_SECOND_PASS_HEADING = ["Father", "Mother", "Spouse"]
 
 
-def _pass1_last_page(pdf_path: Path, second_pass_heading: list[str]) -> int | None:
-    """Last page before a later pass's header, or None when there isn't one."""
-    for page in range(1, page_count(pdf_path) + 1):
-        rows = group_rows(extract_words(pdf_path, page))
-        if rows and [w.text for w in rows[0]] == second_pass_heading:
-            return page - 1
-    return None
-
-
-def _parse(pdf_path: Path, kind: str, vol_col: str, date_col: str,
+def _parse(pdf_path: Path, kind: str, role: str, vol_col: str, date_col: str,
            last_col: str, first_col: str, header_contains: str | None = None,
-           last_page: int | None = None) -> list[Appearance]:
+           last_page: int | None = None, detail_col: str | None = None,
+           ) -> list[Appearance]:
     """Shared body: one Appearance per row that names somebody."""
     out: list[Appearance] = []
     for page, cols, rows in iter_table_pages(pdf_path, last_page=last_page,
@@ -47,12 +38,14 @@ def _parse(pdf_path: Path, kind: str, vol_col: str, date_col: str,
                 given=v.get(first_col, "").strip() or None,
                 surname_key=surname_key(surname),
                 kind=kind,
+                role=role,
                 page=page,
                 raw_line=raw,
                 import_key=import_key(pdf_path.name, page, raw),
                 date_raw=date_raw,
                 date_iso=parse_date(date_raw or ""),
-                place=v.get(vol_col, "").strip() or None,
+                volume=v.get(vol_col, "").strip() or None,
+                detail=(v.get(detail_col, "").strip() or None) if detail_col else None,
             ))
     return out
 
@@ -60,20 +53,23 @@ def _parse(pdf_path: Path, kind: str, vol_col: str, date_col: str,
 def parse_death(pdf_path: Path) -> list[Appearance]:
     """Columns: Volume/Page, First Name, Last Name, Date, Age.
 
-    Bounded to the first pass; see DEATH_SECOND_PASS_HEADING above.
+    Bounded to the first pass; see DEATH_SECOND_PASS_HEADING above. Age has
+    no column of its own on the Appearance, so it's folded into `detail` —
+    matching how cemetery.py folds Age in for burials.
     """
-    last = _pass1_last_page(pdf_path, DEATH_SECOND_PASS_HEADING)
-    return _parse(pdf_path, "death", "Volume/Page", "Date", "Last Name", "First Name",
-                  last_page=last)
+    start = find_header_page(pdf_path, DEATH_SECOND_PASS_HEADING)
+    last = (start - 1) if start else None
+    return _parse(pdf_path, "death", "deceased", "Volume/Page", "Date",
+                  "Last Name", "First Name", last_page=last, detail_col="Age")
 
 
 def parse_warning(pdf_path: Path) -> list[Appearance]:
     """Columns: Volume, Date of Warning, Last Name, First Name."""
-    return _parse(pdf_path, "warning", "Volume", "Date of Warning",
+    return _parse(pdf_path, "warning", "warned", "Volume", "Date of Warning",
                   "Last Name", "First Name")
 
 
 def parse_freeman(pdf_path: Path) -> list[Appearance]:
     """Columns: Volume, Date of Oath, First Name, Last Name."""
-    return _parse(pdf_path, "freeman", "Volume", "Date of Oath",
+    return _parse(pdf_path, "freeman", "sworn", "Volume", "Date of Oath",
                   "Last Name", "First Name", header_contains="Volume")
