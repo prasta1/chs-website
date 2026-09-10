@@ -7,6 +7,7 @@ then owns the horizontal span from its own start to the next column's start,
 so values wider than their heading — right-aligned ages, long spouse names —
 still land in the right place.
 """
+import math
 from pathlib import Path
 from typing import NamedTuple
 
@@ -41,18 +42,40 @@ def group_rows(words: list[Word], tol: float = 3.0) -> list[list[Word]]:
     return rows
 
 
-def detect_columns(header: list[Word], gap: float = 4.0) -> list[Column]:
+def _intra_heading_threshold(gaps: list[float], jump: float = 2.0) -> float:
+    """Separate intra-heading spacing from inter-column spacing.
+
+    Header gaps are bimodal: a few tight gaps inside compound headings like
+    "Maiden Name", then a clear jump to the spacing between columns. These files
+    use different letter-tracking, so the absolute values differ per file while
+    the ratio at the boundary does not. The first sorted-gap ratio jump of
+    `jump` or more marks that boundary; the threshold sits at the geometric mean
+    of the pair. Returns 0.0 when no such jump exists — a header with no
+    compound headings, where every gap separates columns.
+    """
+    ordered = sorted(g for g in gaps if g > 0)
+    for a, b in zip(ordered, ordered[1:]):
+        if b / a >= jump:
+            return math.sqrt(a * b)
+    return 0.0
+
+
+def detect_columns(header: list[Word], gap: float | None = None) -> list[Column]:
     """Derive columns from a header row.
 
-    Header words closer together than `gap` are joined into one heading. Each
-    column spans from its first word's left edge to the next column's left edge;
-    the last column extends to infinity.
+    Header words closer together than the intra-heading threshold are joined
+    into one heading. The threshold adapts to the file's own spacing unless
+    `gap` is given explicitly. Each column spans from its first word's left
+    edge to the next column's left edge; the last column extends to infinity.
     """
     if not header:
         return []
+    gaps = [b.x0 - a.x1 for a, b in zip(header, header[1:])]
+    threshold = gap if gap is not None else _intra_heading_threshold(gaps)
+
     groups: list[list[Word]] = [[header[0]]]
     for prev, cur in zip(header, header[1:]):
-        if cur.x0 - prev.x1 <= gap:
+        if cur.x0 - prev.x1 <= threshold:
             groups[-1].append(cur)
         else:
             groups.append([cur])

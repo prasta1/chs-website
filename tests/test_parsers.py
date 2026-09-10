@@ -25,3 +25,8 @@ def test_cemetery_row_count_is_plausible():
 def test_cemetery_every_row_has_identity_and_key():
     rows = parse_cemetery(PDF_DIR / "cloverdale.pdf", "Cloverdale Cemetery")
     assert all(a.surname and a.import_key and a.page >= 1 for a in rows)
+
+
+def test_southcambridge_parses_despite_wider_letter_tracking():
+    rows = parse_cemetery(PDF_DIR / "southcambridge.pdf", "South Cambridge Cemetery")
+    assert 300 <= len(rows) <= 360

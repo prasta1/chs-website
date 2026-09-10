@@ -44,6 +44,20 @@ def test_right_aligned_age_still_lands_in_age():
     assert assign_columns(match, cols)["Age"] == "86 yrs 9 mos"
 
 
+def test_detect_columns_adapts_to_each_files_letter_tracking():
+    """South Cambridge tracks ~4x wider than East Cambridge; both must parse."""
+    for stem in ("eastcambridge", "cloverdale", "southcambridge"):
+        rows = rows_for(stem)
+        names = [c.name for c in detect_columns(rows[0])][:5]
+        assert names == ["Last Name", "First Name", "Maiden Name", "Born", "Died"], stem
+
+
+def test_detect_columns_honours_an_explicit_gap_override():
+    rows = rows_for("cloverdale")
+    # 0.0 forces every gap to separate columns, splitting compound headings.
+    assert [c.name for c in detect_columns(rows[0], gap=0.0)][:2] == ["Last", "Name"]
+
+
 def test_iter_table_pages_reads_header_once_and_reuses_columns():
     pages = list(iter_table_pages(PDF_DIR / "cloverdale.pdf"))
     assert pages, "expected at least one page of table data"
