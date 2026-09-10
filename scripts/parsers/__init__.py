@@ -21,4 +21,5 @@ class Appearance:
     date_raw: str | None = None
     date_iso: str | None = None
     place: str | None = None
+    volume: str | None = None
     detail: str | None = None

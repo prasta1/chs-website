@@ -6,8 +6,7 @@ under his own name rather than only as a footnote on someone else's row.
 """
 from pathlib import Path
 
-from scripts.extract import page_count, extract_words
-from scripts.layout import assign_columns, group_rows, iter_table_pages
+from scripts.layout import assign_columns, find_header_page, iter_table_pages
 from scripts.normalize import import_key, parse_date, surname_key
 from scripts.parsers import Appearance
 
@@ -19,25 +18,14 @@ from scripts.parsers import Appearance
 SECOND_PASS_HEADING = ["Mother", "Notes"]
 
 
-def _second_pass_start(pdf_path: Path) -> int | None:
-    """Page where the wide table's second pass begins, found by its heading.
-
-    Returns None when the document is a single pass.
-    """
-    for page in range(1, page_count(pdf_path) + 1):
-        rows = group_rows(extract_words(pdf_path, page))
-        if rows and [w.text for w in rows[0]] == SECOND_PASS_HEADING:
-            return page
-    return None
-
-
 def _paired_mothers(pdf_path: Path, second_start: int, pass1_pages: list) -> list[tuple[str, str]]:
     """Mother/Notes for every pass-one row, in row order.
 
     Positional pairing has no shared key with pass one, so a single dropped
     row would silently shift every later mother onto the wrong child — worse
     than a missing mother, since it fabricates a genealogical fact. Verify the
-    page count and every page pair's row count line up before trusting it.
+    page count, the page offset, and every page pair's row count line up
+    before trusting it.
     """
     pass2_pages = list(iter_table_pages(pdf_path, first_page=second_start))
     if len(pass1_pages) != len(pass2_pages):
@@ -47,6 +35,12 @@ def _paired_mothers(pdf_path: Path, second_start: int, pass1_pages: list) -> lis
         )
     mothers: list[tuple[str, str]] = []
     for (p1, _, rows1), (p2, cols2, rows2) in zip(pass1_pages, pass2_pages):
+        if p2 - p1 != second_start - 1:
+            raise ValueError(
+                f"{pdf_path.name}: page {p1} pairs with page {p2}, expected "
+                f"offset {second_start - 1} -- a blank page in only one pass "
+                f"could shift every later pairing undetected"
+            )
         if len(rows1) != len(rows2):
             raise ValueError(
                 f"{pdf_path.name}: page {p1} has {len(rows1)} rows but its "
@@ -60,7 +54,7 @@ def _paired_mothers(pdf_path: Path, second_start: int, pass1_pages: list) -> lis
 
 def parse_birth(pdf_path: Path) -> list[Appearance]:
     """Columns: Volume, Birth Day, Child, Family Name, Father[, Mother, Notes]."""
-    second_start = _second_pass_start(pdf_path)
+    second_start = find_header_page(pdf_path, SECOND_PASS_HEADING)
     last1 = (second_start - 1) if second_start else None
     pass1_pages = list(iter_table_pages(pdf_path, last_page=last1))
     mothers = _paired_mothers(pdf_path, second_start, pass1_pages) if second_start else []
@@ -86,14 +80,14 @@ def parse_birth(pdf_path: Path) -> list[Appearance]:
                 surname=surname, given=child, surname_key=surname_key(surname),
                 kind="birth", role="child", pair_key=key, page=page,
                 raw_line=raw, import_key=key, date_raw=date_raw, date_iso=iso,
-                place=vol, detail=notes or None,
+                volume=vol, detail=notes or None,
             ))
             if father := v.get("Father", "").strip():
                 out.append(Appearance(
                     surname=surname, given=father, surname_key=surname_key(surname),
                     kind="birth", role="father", pair_key=key, page=page,
                     raw_line=raw, import_key=f"{key}:father",
-                    date_raw=date_raw, date_iso=iso, place=vol,
+                    date_raw=date_raw, date_iso=iso, volume=vol,
                     detail=f"father of {child}",
                 ))
             if mother:
@@ -101,7 +95,7 @@ def parse_birth(pdf_path: Path) -> list[Appearance]:
                     surname=surname, given=mother, surname_key=surname_key(surname),
                     kind="birth", role="mother", pair_key=key, page=page,
                     raw_line=raw, import_key=f"{key}:mother",
-                    date_raw=date_raw, date_iso=iso, place=vol,
+                    date_raw=date_raw, date_iso=iso, volume=vol,
                     detail=f"mother of {child}",
                 ))
     return out
@@ -139,6 +133,6 @@ def parse_marriage(pdf_path: Path) -> list[Appearance]:
                     surname=last, given=first, surname_key=surname_key(last),
                     kind="marriage", role=role, pair_key=key, page=page,
                     raw_line=raw, import_key=f"{key}:{role}",
-                    date_raw=date_raw, date_iso=iso, place=vol, detail=detail,
+                    date_raw=date_raw, date_iso=iso, volume=vol, detail=detail,
                 ))
     return out
