@@ -1,7 +1,7 @@
 import pytest
 from conftest import PDF_DIR
 from scripts.db import connect, init_schema
-from scripts.import_pdfs import import_all, upsert
+from scripts.import_pdfs import _dedupe_import_keys, import_all, upsert
 from scripts.parsers import Appearance
 
 
@@ -51,3 +51,33 @@ def test_import_all_loads_every_source():
     counts = import_all(conn, PDF_DIR)
     assert len(counts) == 16
     assert sum(counts.values()) > 7000
+
+
+def test_dedupe_leaves_distinct_keys_untouched():
+    rows = [make(key="a"), make(key="b"), make(key="c")]
+    _dedupe_import_keys(rows)
+    assert [r.import_key for r in rows] == ["a", "b", "c"]
+
+
+def test_dedupe_suffixes_only_repeats_after_the_first():
+    """The first occurrence must keep its bare key, or every existing DB row
+    desyncs and re-import silently orphans every hand correction."""
+    rows = [make(key="dup"), make(key="dup"), make(key="dup"), make(key="other")]
+    _dedupe_import_keys(rows)
+    assert [r.import_key for r in rows] == ["dup", "dup-1", "dup-2", "other"]
+
+
+def test_dedupe_is_stable_across_repeated_parses_of_real_duplicates():
+    """mtview page 52 carries byte-identical ledger lines. The same row must get
+    the same key on every run, or a volunteer's edit is orphaned next import.
+    """
+    from conftest import PDF_DIR
+    from scripts.parsers.cemetery import parse_cemetery
+
+    first = parse_cemetery(PDF_DIR / "mtview.pdf", "Mountain View Cemetery")
+    second = parse_cemetery(PDF_DIR / "mtview.pdf", "Mountain View Cemetery")
+    _dedupe_import_keys(first)
+    _dedupe_import_keys(second)
+    assert [r.import_key for r in first] == [r.import_key for r in second]
+    assert any(r.import_key.endswith("-1") for r in first), \
+        "expected mtview to contain at least one real duplicate group"
