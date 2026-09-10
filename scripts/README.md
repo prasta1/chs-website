@@ -57,10 +57,13 @@ page number, so a differently-paginated reprint doesn't silently misalign.
   *position*: row N of pass two is the mother of row N of pass one. That's
   only safe because it's verified, not assumed: `_paired_mothers` in
   `scripts/parsers/vital.py` asserts the page count and every page pair's row
-  count match before trusting the pairing, and raises `ValueError` — aborting
-  the whole import rather than writing anything — on any mismatch. A wrong
-  mother silently attached to the wrong child is worse than a missing one,
-  because it fabricates a genealogical fact that looks verified.
+  count match before trusting the pairing, and raises `ValueError` on any
+  mismatch. `import_all` commits per source, so this does not abort the whole
+  import — sources already processed before `birth_records.pdf` stay
+  committed — it prevents *this* source's mother/child pairings from being
+  written wrong. A wrong mother silently attached to the wrong child is worse
+  than a missing one, because it fabricates a genealogical fact that looks
+  verified.
 
 - **`death_records.pdf` is a *three*-pass table, and only the first pass is
   parsed.** Pages 1-5 are the deaths themselves (what `parse_death` reads);
