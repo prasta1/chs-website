@@ -122,7 +122,7 @@ def upsert(conn: sqlite3.Connection, source_id: int,
 
 
 def _dedupe_import_keys(rows: list[Appearance]) -> None:
-    """Suffix repeated import_keys within one parse so none collide.
+    """Suffix repeated import_keys (and their pair_key) within one parse.
 
     import_key hashes (filename, page, raw_line). A few source pages contain
     byte-identical lines twice — a duplicated ledger entry, a stray reprinted
@@ -131,6 +131,14 @@ def _dedupe_import_keys(rows: list[Appearance]) -> None:
     IntegrityError) without touching the base key that a plain, non-repeated
     row already has in the database. Parse order is stable across runs, so
     the same row gets the same suffix every time re-import happens.
+
+    A row that fans out (birth, marriage) shares one pair_key with its
+    siblings from the same source line -- that pair_key is the same base sha
+    that import_key carries before any role suffix, so a row's own dedup
+    count `n` is exactly the count its pair_key needs too. Without this, a
+    duplicated marriage line's four rows (sha:groom, sha:bride, sha:groom-1,
+    sha:bride-1) would all keep pair_key=sha, and "who did this person
+    marry" via idx_appearance_pair would return two couples as one.
     """
     seen: dict[str, int] = {}
     for a in rows:
@@ -138,6 +146,8 @@ def _dedupe_import_keys(rows: list[Appearance]) -> None:
         seen[a.import_key] = n + 1
         if n:
             a.import_key = f"{a.import_key}-{n}"
+            if a.pair_key is not None:
+                a.pair_key = f"{a.pair_key}-{n}"
 
 
 def import_all(conn: sqlite3.Connection, pdf_dir: Path) -> dict[str, int]:

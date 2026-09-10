@@ -134,6 +134,29 @@ def test_dedupe_suffixes_only_repeats_after_the_first():
     assert [r.import_key for r in rows] == ["dup", "dup-1", "dup-2", "other"]
 
 
+def test_dedupe_disambiguates_pair_key_for_a_duplicated_marriage_line():
+    """A duplicated marriage line makes four rows: sha:groom, sha:bride (line
+    1), sha:groom, sha:bride (line 2, a byte-identical repeat). Suffixing
+    only import_key leaves all four sharing pair_key='sha' -- 'who did this
+    person marry' via idx_appearance_pair would then return two couples as
+    one. pair_key must gain the same -N suffix as its row's import_key, and
+    groom/bride of the SAME occurrence must still share one pair_key."""
+
+    def row(role):
+        return Appearance(surname="X", given="Y", surname_key="X", kind="marriage",
+                          role=role, page=1, raw_line="raw", pair_key="sha",
+                          import_key=f"sha:{role}")
+
+    rows = [row("groom"), row("bride"), row("groom"), row("bride")]
+    _dedupe_import_keys(rows)
+    assert [r.import_key for r in rows] == [
+        "sha:groom", "sha:bride", "sha:groom-1", "sha:bride-1"]
+    assert [r.pair_key for r in rows] == ["sha", "sha", "sha-1", "sha-1"]
+    assert rows[0].pair_key == rows[1].pair_key       # line 1's couple
+    assert rows[2].pair_key == rows[3].pair_key       # line 2's couple
+    assert rows[0].pair_key != rows[2].pair_key       # the two lines differ
+
+
 def test_dedupe_is_stable_across_repeated_parses_of_real_duplicates():
     """mtview page 52 carries byte-identical ledger lines. The same row must get
     the same key on every run, or a volunteer's edit is orphaned next import.
