@@ -90,8 +90,16 @@ def detect_columns(header: list[Word], gap: float | None = None) -> list[Column]
             groups.append([cur])
 
     cols = []
+    seen: dict[str, int] = {}
     for i, group in enumerate(groups):
         name = " ".join(w.text for w in group)
+        # A genuinely duplicated heading (two spans sharing one name) must not
+        # collapse in assign_columns's name-keyed dict -- that would silently
+        # merge the spans and drop whichever value loses the collision. Real
+        # headers never repeat a name, so this is a no-op for them.
+        seen[name] = seen.get(name, 0) + 1
+        if seen[name] > 1:
+            name = f"{name} ({seen[name]})"
         x0 = group[0].x0
         x1 = groups[i + 1][0].x0 if i + 1 < len(groups) else float("inf")
         cols.append(Column(name=name, x0=x0, x1=x1))

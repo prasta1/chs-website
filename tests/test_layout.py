@@ -60,6 +60,21 @@ def test_detect_columns_honours_an_explicit_gap_override():
     assert [c.name for c in detect_columns(rows[0], gap=0.0)][:2] == ["Last", "Name"]
 
 
+def test_assign_columns_never_collapses_duplicate_column_names():
+    """gap=0.0 splits Last/First/Maiden Name into three separate columns that
+    all share the bare name 'Name'. assign_columns keys its output dict by
+    column name, so before disambiguation those three distinct spans collapse
+    onto one dict key and two of the three spans' values vanish."""
+    rows = rows_for("cloverdale")
+    cols = detect_columns(rows[0], gap=0.0)
+    assert len(cols) == 13
+    assert len({c.name for c in cols}) == 13, "detect_columns must not emit duplicate names"
+
+    match = [r for r in rows if any(w.text == "Margaret" for w in r)][0]
+    got = assign_columns(match, cols)
+    assert len(got) == 13, "assign_columns must not lose columns to name collisions"
+
+
 CEMETERY_COLS = ["Last Name", "First Name", "Maiden Name", "Born", "Died", "Age"]
 
 # Every record table, not just the cemeteries. freemansworn_records is absent
