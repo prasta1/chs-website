@@ -62,6 +62,33 @@ def test_edited_rows_key_seen_flag_clears_when_the_key_reappears(conn):
     assert row["key_seen"] == 1
 
 
+def test_retired_edited_row_reactivates_when_its_key_reappears(conn):
+    """A row can be retired (unedited, source vanished) and later
+    hand-edited by a human correcting the stale data. If its key then
+    reappears in a later import, the row must come back to status='active'
+    -- not stay retired forever, invisible to review_report's active-only
+    view."""
+    upsert(conn, 1, [make(key="k")])
+    conn.execute("UPDATE appearance SET status='retired', edited_at='2026-01-01',"
+                 " edited_by='jen', key_seen=0 WHERE import_key='k'")
+    conn.commit()
+    upsert(conn, 1, [make(key="k")])  # key reappears byte-identical
+    row = conn.execute("SELECT status FROM appearance WHERE import_key='k'").fetchone()
+    assert row["status"] == "active"
+
+
+def test_update_path_resets_a_stale_key_seen_flag(conn):
+    """key_seen=0 must not survive on a row whose key is present in the
+    current import, or a stale flag from an earlier edit cycle falsely
+    reads forever as 'source line has changed or vanished'."""
+    upsert(conn, 1, [make(key="k")])
+    conn.execute("UPDATE appearance SET key_seen=0 WHERE import_key='k'")
+    conn.commit()
+    upsert(conn, 1, [make(key="k")])  # normal re-import, unedited, key present
+    row = conn.execute("SELECT key_seen FROM appearance WHERE import_key='k'").fetchone()
+    assert row["key_seen"] == 1
+
+
 def test_rows_absent_from_reimport_are_retired_not_deleted(conn):
     upsert(conn, 1, [make(key="gone")])
     upsert(conn, 1, [make(key="stays")])

@@ -71,10 +71,11 @@ def upsert(conn: sqlite3.Connection, source_id: int,
             skipped += 1
             if not prior["key_seen"]:
                 # The key had previously gone missing and reappeared
-                # byte-identical -- clear the stale flag.
+                # byte-identical -- clear the stale flag and, if a retired
+                # row's key came back, restore it to active too.
                 conn.execute(
-                    "UPDATE appearance SET key_seen=1 WHERE import_key=?",
-                    (a.import_key,))
+                    "UPDATE appearance SET key_seen=1, status='active'"
+                    " WHERE import_key=?", (a.import_key,))
             continue
         # Named placeholders so one dict drives both statements — the INSERT and
         # UPDATE differ only in whether source_id is set.
@@ -100,7 +101,7 @@ def upsert(conn: sqlite3.Connection, source_id: int,
                 " surname=:surname, given=:given, surname_key=:surname_key,"
                 " kind=:kind, role=:role, pair_key=:pair_key, date_raw=:date_raw,"
                 " date_iso=:date_iso, place=:place, volume=:volume, detail=:detail,"
-                " status='active' WHERE import_key=:import_key", fields)
+                " status='active', key_seen=1 WHERE import_key=:import_key", fields)
             updated += 1
 
     stale = [k for k in existing if k not in seen]
