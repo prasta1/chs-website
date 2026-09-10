@@ -150,9 +150,15 @@ def _dedupe_import_keys(rows: list[Appearance]) -> None:
                 a.pair_key = f"{a.pair_key}-{n}"
 
 
-def import_all(conn: sqlite3.Connection, pdf_dir: Path) -> dict[str, int]:
-    """Import every in-scope source. Returns stem -> appearance count."""
-    counts: dict[str, int] = {}
+def import_all(conn: sqlite3.Connection, pdf_dir: Path) -> dict[str, tuple[int, int, int]]:
+    """Import every in-scope source. Returns stem -> (inserted, updated, skipped_edited).
+
+    skipped_edited is the number of hand-edited rows preserved instead of
+    overwritten this run -- the number an operator needs to know how many
+    volunteer corrections survived the import, which a plain row count
+    can't distinguish from a fresh insert or an unedited update.
+    """
+    counts: dict[str, tuple[int, int, int]] = {}
     for stem, (title, kind, parser) in SOURCES.items():
         path = pdf_dir / f"{stem}.pdf"
         conn.execute(
@@ -165,8 +171,7 @@ def import_all(conn: sqlite3.Connection, pdf_dir: Path) -> dict[str, int]:
             "SELECT id FROM source WHERE filename=?", (path.name,)).fetchone()["id"]
         rows = parser(path)
         _dedupe_import_keys(rows)
-        upsert(conn, source_id, rows)
-        counts[stem] = len(rows)
+        counts[stem] = upsert(conn, source_id, rows)
     return counts
 
 
@@ -175,5 +180,6 @@ if __name__ == "__main__":
     db.parent.mkdir(exist_ok=True)
     conn = connect(db)
     init_schema(conn)
-    for stem, n in import_all(conn, Path("pdfs")).items():
-        print(f"{stem:<24} {n}")
+    for stem, (inserted, updated, skipped) in import_all(conn, Path("pdfs")).items():
+        print(f"{stem:<24} inserted={inserted:<6} updated={updated:<6} "
+              f"skipped_edited={skipped}")

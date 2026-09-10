@@ -117,7 +117,49 @@ def test_import_all_loads_every_source():
     init_schema(conn)
     counts = import_all(conn, PDF_DIR)
     assert len(counts) == 16
-    assert sum(counts.values()) > 7000
+    # A fresh in-memory db has no prior rows, so every row this run produces
+    # must land as an insert -- nothing to update, nothing edited to skip.
+    assert all(updated == 0 and skipped == 0 for _, updated, skipped in counts.values())
+    assert sum(inserted for inserted, _, _ in counts.values()) > 7000
+
+
+def test_import_all_reports_updates_and_skips_on_a_second_run(monkeypatch):
+    """The number that operationally matters -- how many volunteer
+    corrections survived a re-import -- can't be told apart from a plain
+    row-count total, so import_all must surface upsert's own
+    (inserted, updated, skipped) breakdown per source, not just len(rows).
+    Reached entirely through import_all + a real hand edit made via SQL
+    (the only correction path this phase has, same pattern as
+    test_hand_edited_rows_are_never_overwritten above), never by
+    hand-seeding the appearance table's own columns.
+
+    Scoped to riverroad.pdf (20 rows) via monkeypatching import_pdfs.SOURCES
+    -- the real import_all/upsert/parser/db path runs unmodified, just over
+    one small source instead of the full 16-source corpus, so this doesn't
+    pay for two full imports.
+    """
+    import scripts.import_pdfs as import_pdfs
+    from scripts.db import connect as c2
+    from scripts.parsers.cemetery import parse_cemetery
+
+    monkeypatch.setattr(import_pdfs, "SOURCES", {
+        "riverroad": ("River Road Cemetery", "cemetery",
+                     lambda p: parse_cemetery(p, "River Road Cemetery")),
+    })
+
+    conn = c2(":memory:")
+    init_schema(conn)
+    import_all(conn, PDF_DIR)  # first run: everything inserted
+
+    conn.execute("UPDATE appearance SET edited_at='2026-01-01', edited_by='jen'"
+                 " WHERE id=(SELECT id FROM appearance LIMIT 1)")
+    conn.commit()
+
+    counts = import_all(conn, PDF_DIR)  # second run: re-import, unchanged PDF
+    inserted, updated, skipped = counts["riverroad"]
+    assert inserted == 0, "no source rows changed between the two runs"
+    assert updated == 19, "every unedited row should be re-matched as an update"
+    assert skipped == 1, "the one hand-edited row must be preserved, not overwritten"
 
 
 def test_dedupe_leaves_distinct_keys_untouched():
