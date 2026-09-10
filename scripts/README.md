@@ -18,9 +18,22 @@ Use `.venv/bin/python -m pip`, never `.venv/bin/pip` — venv script shebangs
 hold absolute paths and break if the folder is moved.
 
 `import_pdfs` is safe to re-run: it upserts by a stable `import_key` (a hash
-of filename, page and raw line), leaves rows with a hand correction
-(`edited_at` set) untouched, and retires rows that vanish from a source
-rather than deleting them. Re-running it twice in a row changes no counts.
+of filename, page and raw line). An *unedited* row that vanishes from a
+source is retired rather than deleted. A row with a hand correction
+(`edited_at` set) is never retired, even if its source line changes or
+disappears — it stays active and authoritative, and its `key_seen` flag is
+cleared instead so a human can reconcile it. Re-running it twice in a row
+changes no counts.
+
+`init_schema` only runs `CREATE TABLE IF NOT EXISTS`, so it does not add
+columns to a database created before they existed. A database predating the
+`volume` and `key_seen` columns needs a one-time migration before
+`import_pdfs` will run against it:
+
+```bash
+sqlite3 data/archive.sqlite "ALTER TABLE appearance ADD COLUMN volume TEXT;
+ALTER TABLE appearance ADD COLUMN key_seen INTEGER NOT NULL DEFAULT 1;"
+```
 
 ## How it works
 
