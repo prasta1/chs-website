@@ -38,6 +38,12 @@ def test_surname_key_handles_empty():
     assert surname_key("") == ""
 
 
+def test_surname_key_pins_the_expected_metaphone_value():
+    """Tasks 9's fixtures hard-code "ATT"; pin it so a metaphone version bump
+    fails here rather than as a confusing fixture mismatch elsewhere."""
+    assert surname_key("Atwood") == "ATT"
+
+
 def test_import_key_is_stable():
     a = import_key("cloverdale.pdf", 1, "Atwood Ruth 1831-2-11")
     b = import_key("cloverdale.pdf", 1, "Atwood Ruth 1831-2-11")
