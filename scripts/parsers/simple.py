@@ -5,21 +5,18 @@ the column names and the event kind differ.
 """
 from pathlib import Path
 
-from scripts.layout import assign_columns, find_header_page, iter_table_pages
+from scripts.layout import assign_columns, iter_table_pages
 from scripts.normalize import import_key, parse_date, surname_key
-from scripts.parsers import Appearance
+from scripts.parsers import Appearance, bounds_for
 
 # death_records.pdf prints as three passes over the same pages: death core
 # (Volume/Page, First/Last Name, Date, Age), then a Father/Mother/Spouse table
 # for the same rows, then a Cause table — the same wide-table-in-passes shape
 # birth_records uses (see vital.py), but with no columns this parser wants.
-# Found by its own header text rather than a hardcoded page number, so a
-# differently-paginated reprint doesn't silently misalign. death_records is
-# known multi-pass, so a None here always means the heading text changed or
-# moved -- parse_death raises rather than silently falling through to an
-# unbounded page range, which would parse the later passes with the death
-# core's columns and manufacture fake death rows.
-DEATH_SECOND_PASS_HEADING = ["Father", "Mother", "Spouse"]
+# The pass boundary (see scripts/parsers/__init__.py's bounds_for, the single
+# source of truth also read by validate.py's reconcile) is found by its own
+# header text rather than a hardcoded page number, so a differently-paginated
+# reprint doesn't silently misalign.
 
 
 def _parse(pdf_path: Path, kind: str, role: str, vol_col: str, date_col: str,
@@ -57,23 +54,16 @@ def _parse(pdf_path: Path, kind: str, role: str, vol_col: str, date_col: str,
 def parse_death(pdf_path: Path) -> list[Appearance]:
     """Columns: Volume/Page, First Name, Last Name, Date, Age.
 
-    Bounded to the first pass; see DEATH_SECOND_PASS_HEADING above. Age is
-    NOT folded into `detail`: the source table's Age column mis-splits for
-    ages spanning years+months+days (the years token falls left of the
-    column boundary, into date_raw), so folding it would store a truncated,
-    wrong age for some rows. The full age string still survives in
-    raw_line -- a missing fact beats a fabricated one.
+    Bounded to the first pass; see scripts/parsers/__init__.py's
+    SECOND_PASS_HEADINGS. Age is NOT folded into `detail`: the source
+    table's Age column mis-splits for ages spanning years+months+days (the
+    years token falls left of the column boundary, into date_raw), so
+    folding it would store a truncated, wrong age for some rows. The full
+    age string still survives in raw_line -- a missing fact beats a
+    fabricated one.
     """
-    start = find_header_page(pdf_path, DEATH_SECOND_PASS_HEADING)
-    if start is None:
-        raise ValueError(
-            f"{pdf_path.name}: expected second-pass heading "
-            f"{DEATH_SECOND_PASS_HEADING} not found -- death_records is known "
-            "multi-pass, so this means the heading text moved or changed, not "
-            "that there is no second pass"
-        )
     return _parse(pdf_path, "death", "deceased", "Volume/Page", "Date",
-                  "Last Name", "First Name", last_page=start - 1)
+                  "Last Name", "First Name", **bounds_for("death_records", pdf_path))
 
 
 def parse_warning(pdf_path: Path) -> list[Appearance]:
@@ -85,4 +75,5 @@ def parse_warning(pdf_path: Path) -> list[Appearance]:
 def parse_freeman(pdf_path: Path) -> list[Appearance]:
     """Columns: Volume, Date of Oath, First Name, Last Name."""
     return _parse(pdf_path, "freeman", "sworn", "Volume", "Date of Oath",
-                  "Last Name", "First Name", header_contains="Volume")
+                  "Last Name", "First Name",
+                  **bounds_for("freemansworn_records", pdf_path))

@@ -6,20 +6,17 @@ under his own name rather than only as a footnote on someone else's row.
 """
 from pathlib import Path
 
-from scripts.layout import assign_columns, find_header_page, iter_table_pages
+from scripts.layout import assign_columns, iter_table_pages
 from scripts.normalize import import_key, parse_date, surname_key
-from scripts.parsers import Appearance
+from scripts.parsers import Appearance, bounds_for
 
 # birth_records.pdf prints as a wide table in two passes over the same pages:
 # pass one carries Volume/Birth Day/Child/Family Name/Father, pass two carries
-# Mother/Notes for the same rows in the same order. Found by its own header
-# text rather than a hardcoded page number, so a differently-paginated
-# reprint doesn't silently misalign. birth_records is known multi-pass, so a
-# None here always means the heading text changed or moved -- parse_birth
-# raises rather than silently falling through to an unbounded page range,
-# which would parse the second pass with the first pass's columns and
-# manufacture fake people.
-SECOND_PASS_HEADING = ["Mother", "Notes"]
+# Mother/Notes for the same rows in the same order. The pass boundary (see
+# scripts/parsers/__init__.py's bounds_for, the single source of truth also
+# read by validate.py's reconcile) is found by its own header text rather
+# than a hardcoded page number, so a differently-paginated reprint doesn't
+# silently misalign.
 
 
 def _paired_mothers(pdf_path: Path, second_start: int, pass1_pages: list) -> list[tuple[str, str]]:
@@ -58,14 +55,9 @@ def _paired_mothers(pdf_path: Path, second_start: int, pass1_pages: list) -> lis
 
 def parse_birth(pdf_path: Path) -> list[Appearance]:
     """Columns: Volume, Birth Day, Child, Family Name, Father, Mother, Notes."""
-    second_start = find_header_page(pdf_path, SECOND_PASS_HEADING)
-    if second_start is None:
-        raise ValueError(
-            f"{pdf_path.name}: expected second-pass heading {SECOND_PASS_HEADING} "
-            "not found -- birth_records is known multi-pass, so this means the "
-            "heading text moved or changed, not that there is no second pass"
-        )
-    pass1_pages = list(iter_table_pages(pdf_path, last_page=second_start - 1))
+    bounds = bounds_for("birth_records", pdf_path)  # raises if the pass-two
+    second_start = bounds["last_page"] + 1           # heading isn't found
+    pass1_pages = list(iter_table_pages(pdf_path, **bounds))
     mothers = _paired_mothers(pdf_path, second_start, pass1_pages)
 
     out: list[Appearance] = []

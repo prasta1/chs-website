@@ -450,3 +450,26 @@ def test_review_report_does_not_flag_a_complete_marriage_pair(conn):
 def test_reconcile_skips_sources_not_yet_in_the_db(conn):
     from scripts.validate import reconcile
     assert reconcile(conn, PDF_DIR) == {}
+
+
+def test_reconcile_shares_one_bounds_source_with_the_real_parser(monkeypatch, tmp_path):
+    """reconcile's rows_in must be driven by the same pass-boundary lookup
+    the real parser uses (scripts.parsers.bounds_for), not a second,
+    independently re-derived one -- otherwise a parser bound change that
+    isn't mirrored here makes rows_in silently count a different page set
+    than the parser actually read. With find_header_page unable to find
+    death_records' second-pass heading, parse_death raises (see
+    test_parse_death_raises_loudly_when_the_second_pass_header_is_missing);
+    reconcile must raise the same way, not fall back to an unbounded range."""
+    import scripts.parsers as parsers
+    from scripts.validate import reconcile
+
+    c = connect(tmp_path / "t.sqlite")
+    init_schema(c)
+    c.execute("INSERT INTO source (filename,title,kind,pages,sha256,imported_at)"
+              " VALUES ('death_records.pdf','Death records','vital',1,'s','now')")
+    c.commit()
+
+    monkeypatch.setattr(parsers, "find_header_page", lambda *a, **kw: None)
+    with pytest.raises(ValueError, match="second-pass"):
+        reconcile(c, PDF_DIR)

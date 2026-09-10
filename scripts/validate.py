@@ -8,9 +8,8 @@ import sqlite3
 from pathlib import Path
 
 from scripts.import_pdfs import SOURCES
-from scripts.layout import find_header_page, iter_table_pages
-from scripts.parsers.simple import DEATH_SECOND_PASS_HEADING
-from scripts.parsers.vital import SECOND_PASS_HEADING
+from scripts.layout import iter_table_pages
+from scripts.parsers import bounds_for
 
 TOLERANCE = 0.02  # 2% drift allowed before a source is considered broken
 
@@ -99,34 +98,6 @@ def check_integrity(conn: sqlite3.Connection) -> list[str]:
     return problems
 
 
-# stem -> the heading that marks a later pass's header, for the two wide
-# tables printed in passes (see vital.py / simple.py). Reuses the parsers'
-# own heading constants and scripts.layout.find_header_page, the same
-# lookup the real parsers use, rather than a second, independent
-# implementation of the page scan -- only the stem-to-heading mapping is
-# inherently source-specific and has to live here.
-_SECOND_PASS_HEADINGS = {
-    "birth_records": SECOND_PASS_HEADING,
-    "death_records": DEATH_SECOND_PASS_HEADING,
-}
-
-
-def _parser_bounds(stem: str, pdf_path: Path) -> dict:
-    """The page range / header hint the real parser for `stem` uses.
-
-    Reuses each parser's own pass-boundary heading (rather than re-deriving
-    it) so rows_in below counts exactly the rows the parser looked at -- not
-    the whole file, which for a bounded wide-table PDF like birth/death would
-    double-count the second pass and make the reconciliation meaningless.
-    """
-    if stem in _SECOND_PASS_HEADINGS:
-        start = find_header_page(pdf_path, _SECOND_PASS_HEADINGS[stem])
-        return {"last_page": (start - 1) if start is not None else None}
-    if stem == "freemansworn_records":
-        return {"header_contains": "Volume"}
-    return {}
-
-
 def reconcile(conn: sqlite3.Connection, pdf_dir: Path) -> dict[str, dict]:
     """Per-source rows_in / rows_out / delta -- nothing is dropped invisibly.
 
@@ -168,7 +139,7 @@ def reconcile(conn: sqlite3.Connection, pdf_dir: Path) -> dict[str, dict]:
         if src is None:
             continue
         rows_in = sum(len(rows) for _, _, rows in
-                       iter_table_pages(path, **_parser_bounds(stem, path)))
+                       iter_table_pages(path, **bounds_for(stem, path)))
         keys = conn.execute(
             "SELECT import_key FROM appearance WHERE source_id=? AND"
             " status='active' AND import_key IS NOT NULL", (src["id"],)).fetchall()

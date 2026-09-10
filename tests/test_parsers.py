@@ -111,9 +111,9 @@ def test_parse_birth_raises_loudly_when_the_second_pass_header_is_missing(monkey
     rows get parsed with pass-one's columns and manufacture fake people (see
     test_birth_second_pass_does_not_leak_note_fragments_as_people, which
     guards the case where the header IS found)."""
-    import scripts.parsers.vital as vital
+    import scripts.parsers as parsers
 
-    monkeypatch.setattr(vital, "find_header_page", lambda *a, **kw: None)
+    monkeypatch.setattr(parsers, "find_header_page", lambda *a, **kw: None)
     with pytest.raises(ValueError, match="second-pass"):
         parse_birth(PDF_DIR / "birth_records.pdf")
 
@@ -155,9 +155,9 @@ def test_death_does_not_leak_the_kinship_and_cause_passes():
 
 def test_parse_death_raises_loudly_when_the_second_pass_header_is_missing(monkeypatch):
     """Same guarantee as parse_birth, for death_records's three-pass table."""
-    import scripts.parsers.simple as simple
+    import scripts.parsers as parsers
 
-    monkeypatch.setattr(simple, "find_header_page", lambda *a, **kw: None)
+    monkeypatch.setattr(parsers, "find_header_page", lambda *a, **kw: None)
     with pytest.raises(ValueError, match="second-pass"):
         parse_death(PDF_DIR / "death_records.pdf")
 
