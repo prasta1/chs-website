@@ -102,6 +102,23 @@ def test_iter_table_pages_reads_header_once_and_reuses_columns():
         "the header row must be consumed, not yielded as data"
 
 
+def test_iter_table_pages_forwards_gap_to_detect_columns():
+    """detect_columns's docstring says pass `gap` to override the derived
+    threshold; iter_table_pages must actually forward it, or no production
+    caller can reach the override it promises."""
+    pages = list(iter_table_pages(PDF_DIR / "cloverdale.pdf", gap=0.0))
+    _, cols, _ = pages[0]
+    # gap=0.0 forces every header gap to separate columns, splitting the
+    # compound heading "Last Name" into two -- only reachable if gap arrives.
+    assert [c.name for c in cols][:2] == ["Last", "Name"]
+
+
+def test_iter_table_pages_raises_a_clear_error_for_an_unmatched_header_contains():
+    with pytest.raises(ValueError, match="nonexistentword"):
+        list(iter_table_pages(PDF_DIR / "cloverdale.pdf",
+                              header_contains="nonexistentword"))
+
+
 def test_iter_table_pages_skips_a_title_row_via_header_contains():
     """freemansworn_records prints a caption ("Freeman's Oaths Taken") above
     its real header; header_contains lets the caller name a word only the

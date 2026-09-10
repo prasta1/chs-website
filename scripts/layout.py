@@ -117,7 +117,7 @@ def assign_columns(row: list[Word], cols: list[Column]) -> dict[str, str]:
 
 
 def iter_table_pages(pdf_path: Path, first_page: int = 1, last_page: int | None = None,
-                     header_contains: str | None = None):
+                     header_contains: str | None = None, gap: float | None = None):
     """Yield (page, columns, data_rows) for a table PDF.
 
     Columns are read from the header row on the first page that has one and
@@ -126,7 +126,9 @@ def iter_table_pages(pdf_path: Path, first_page: int = 1, last_page: int | None 
     document, each pass carrying a different set of columns and its own header.
     `header_contains` names a word the header is known to carry, so leading
     title rows are skipped rather than mistaken for the header — some of these
-    tables print a caption line above their column names.
+    tables print a caption line above their column names. `gap` is forwarded
+    to `detect_columns` as an explicit intra-heading threshold, overriding the
+    per-file derived one, for the rare table that defeats the heuristic.
 
     Most of these tables reprint their column header on every page, not just
     the first. A repeated header is not a record, so any row whose word texts
@@ -145,12 +147,33 @@ def iter_table_pages(pdf_path: Path, first_page: int = 1, last_page: int | None 
             header_idx = 0
             if header_contains is not None:
                 header_idx = next(
-                    i for i, row in enumerate(rows)
-                    if any(w.text == header_contains for w in row)
+                    (i for i, row in enumerate(rows)
+                     if any(w.text == header_contains for w in row)),
+                    None,
                 )
-            cols = detect_columns(rows[header_idx])
+                if header_idx is None:
+                    raise ValueError(
+                        f"{pdf_path.name} page {page}: no row contains the header "
+                        f"word {header_contains!r}"
+                    )
+            cols = detect_columns(rows[header_idx], gap=gap)
             header_texts = tuple(w.text for w in rows[header_idx])
             start = header_idx + 1
         data_rows = [r for r in rows[start:]
                      if tuple(w.text for w in r) != header_texts]
         yield page, cols, data_rows
+
+
+def find_header_page(pdf_path: Path, heading: list[str]) -> int | None:
+    """Page whose first row of words matches `heading` exactly, or None.
+
+    Used to locate a later pass's header in a wide table printed across
+    several passes over the same page range (see vital.py and simple.py),
+    so the split point is found by content rather than a hardcoded page
+    number that would silently drift if the document were repaginated.
+    """
+    for page in range(1, page_count(pdf_path) + 1):
+        rows = group_rows(extract_words(pdf_path, page))
+        if rows and [w.text for w in rows[0]] == heading:
+            return page
+    return None
