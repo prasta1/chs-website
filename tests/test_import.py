@@ -67,10 +67,23 @@ def test_retired_edited_row_reactivates_when_its_key_reappears(conn):
     hand-edited by a human correcting the stale data. If its key then
     reappears in a later import, the row must come back to status='active'
     -- not stay retired forever, invisible to review_report's active-only
-    view."""
+    view.
+
+    status='retired' and key_seen must come from the real retire path (via
+    upsert), not be hand-seeded -- the retire path sets status only, so a
+    row hand-seeded with status='retired', key_seen=0 together is a state
+    upsert itself can never produce, and a test built on it can pass against
+    broken code. edited_at/edited_by are hand-set because no correction
+    tooling exists yet in this phase; that's the only unavoidable seed.
+    """
     upsert(conn, 1, [make(key="k")])
-    conn.execute("UPDATE appearance SET status='retired', edited_at='2026-01-01',"
-                 " edited_by='jen', key_seen=0 WHERE import_key='k'")
+    upsert(conn, 1, [make(key="unrelated")])  # 'k' absent this run -> retired
+    row = conn.execute("SELECT status, key_seen FROM appearance"
+                       " WHERE import_key='k'").fetchone()
+    assert (row["status"], row["key_seen"]) == ("retired", 0)
+
+    conn.execute("UPDATE appearance SET edited_at='2026-01-01', edited_by='jen'"
+                 " WHERE import_key='k'")
     conn.commit()
     upsert(conn, 1, [make(key="k")])  # key reappears byte-identical
     row = conn.execute("SELECT status FROM appearance WHERE import_key='k'").fetchone()

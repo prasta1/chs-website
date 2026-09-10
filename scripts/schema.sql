@@ -34,8 +34,11 @@ CREATE TABLE IF NOT EXISTS appearance (
   edited_at   TEXT,
   edited_by   TEXT,
   -- 1 if this row's import_key was present in the most recent import; 0
-  -- means an edited row's key went missing (source line changed or the row
-  -- vanished) -- the row is never retired for this, only flagged for review.
+  -- otherwise. An edited row whose key goes missing is never retired for
+  -- this alone, only flagged for review; an unedited row whose key goes
+  -- missing is retired *and* gets key_seen=0, so that if a human later
+  -- corrects it (edited_at set) and its key then reappears, key_seen=0 is
+  -- what tells upsert() to restore it to active.
   key_seen    INTEGER NOT NULL DEFAULT 1
 );
 

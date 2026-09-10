@@ -110,8 +110,13 @@ def upsert(conn: sqlite3.Connection, source_id: int,
             conn.execute("UPDATE appearance SET key_seen=0 WHERE import_key=?",
                          (key,))
         else:
-            conn.execute("UPDATE appearance SET status='retired' WHERE import_key=?",
-                         (key,))
+            # key_seen must also drop to 0 here: it means "seen in the most
+            # recent import," and this key was not. Leaving it at 1 is what
+            # let a retired row's key_seen==0 reactivation gate above never
+            # fire once that row was later hand-edited and its key reappeared.
+            conn.execute(
+                "UPDATE appearance SET status='retired', key_seen=0"
+                " WHERE import_key=?", (key,))
     conn.commit()
     return inserted, updated, skipped
 
